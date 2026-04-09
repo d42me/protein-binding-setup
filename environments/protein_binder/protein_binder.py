@@ -19,27 +19,51 @@ from redesign_scope import (
     make_quick_screen_report,
     parse_candidate_id,
 )
+from synthetic_dataset import normalize_sequence
 
 SYSTEM_PROMPT = """You are running a budgeted peptide-binder redesign campaign.
-Work strategically: inspect the candidate table, create variants with design strategies, screen promising candidates, and submit the best screened candidate ID.
+Work strategically: inspect the candidate table, create variants with design strategies, screen promising candidates, and submit the best screened candidate.
 Reserve one turn for the final answer. If budget is getting low or you already have a strong screened candidate, stop searching and answer.
-Always finish with exactly one answer tag like <answer>C0003</answer>."""
+Always finish with both tags, for example:
+<answer>C0003</answer>
+<sequence>ACDEFGHIK</sequence>"""
 
 
-def _parsed_candidate_id(completion: vf.Messages, parser: vf.XMLParser) -> str:
-    parsed = (parser.parse_answer(completion) or "").strip().upper()
-    if parse_candidate_id(parsed) is None:
-        return ""
-    return f"C{parse_candidate_id(parsed):04d}"
+def _parse_submission(completion: vf.Messages, parser: vf.XMLParser) -> tuple[str, str]:
+    selected_id = ""
+    selected_sequence = ""
+
+    for msg in reversed(parser.get_assistant_messages(completion)):
+        content = parser._content_to_text(
+            msg.get("content", "") if isinstance(msg, dict) else (msg.content or "")
+        )
+        parsed = parser.parse(content, last=True)
+
+        raw_id = (getattr(parsed, "answer", None) or "").strip().upper()
+        if parse_candidate_id(raw_id) is not None:
+            selected_id = f"C{parse_candidate_id(raw_id):04d}"
+
+        raw_sequence = getattr(parsed, "sequence", None) or ""
+        if raw_sequence:
+            selected_sequence = normalize_sequence(raw_sequence)
+
+        if selected_id or selected_sequence:
+            break
+
+    return selected_id, selected_sequence
 
 
 async def selection_reward(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
-    selected_id = _parsed_candidate_id(completion, parser)
-    if not selected_id:
+    selected_id, selected_sequence = _parse_submission(completion, parser)
+    if not selected_id or not selected_sequence:
         return 0.0
 
     screened_ids = set(state.get("screened_ids", []))
     if selected_id not in screened_ids:
+        return 0.0
+
+    candidate_sequences = state.get("candidate_sequences", {})
+    if candidate_sequences.get(selected_id) != selected_sequence:
         return 0.0
 
     candidate_truths = state.get("candidate_truths", {})
@@ -55,14 +79,14 @@ async def selection_reward(completion: vf.Messages, state: vf.State, parser: vf.
 
 
 async def chosen_true_score(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
-    selected_id = _parsed_candidate_id(completion, parser)
+    selected_id, _ = _parse_submission(completion, parser)
     if not selected_id:
         return 0.0
     return float(state.get("candidate_truths", {}).get(selected_id, 0.0))
 
 
 async def chosen_improvement(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
-    selected_id = _parsed_candidate_id(completion, parser)
+    selected_id, _ = _parse_submission(completion, parser)
     if not selected_id:
         return 0.0
     true_score = float(state.get("candidate_truths", {}).get(selected_id, 0.0))
@@ -71,14 +95,14 @@ async def chosen_improvement(completion: vf.Messages, state: vf.State, parser: v
 
 
 async def screened_selection_metric(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
-    selected_id = _parsed_candidate_id(completion, parser)
+    selected_id, _ = _parse_submission(completion, parser)
     if not selected_id:
         return 0.0
     return 1.0 if selected_id in set(state.get("screened_ids", [])) else 0.0
 
 
 async def chose_full_screened(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
-    selected_id = _parsed_candidate_id(completion, parser)
+    selected_id, _ = _parse_submission(completion, parser)
     if not selected_id:
         return 0.0
     return 1.0 if selected_id in set(state.get("full_screened_ids", [])) else 0.0
@@ -112,6 +136,14 @@ async def quick_screen_calls_metric(completion: vf.Messages, state: vf.State) ->
 
 async def full_screen_calls_metric(completion: vf.Messages, state: vf.State) -> float:
     return float(state.get("full_screen_calls", 0))
+
+
+async def submitted_sequence_matches_candidate(completion: vf.Messages, state: vf.State, parser: vf.XMLParser) -> float:
+    selected_id, selected_sequence = _parse_submission(completion, parser)
+    if not selected_id or not selected_sequence:
+        return 0.0
+    candidate_sequences = state.get("candidate_sequences", {})
+    return 1.0 if candidate_sequences.get(selected_id) == selected_sequence else 0.0
 
 
 class ProteinBinderScopeEnv(vf.StatefulToolEnv):
@@ -185,11 +217,13 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
     def _sync_state(self, state: vf.State, session: dict[str, Any]) -> None:
         candidates = session["candidates"]
         truths = {candidate_id: data["true_score"] for candidate_id, data in candidates.items()}
+        sequences = {candidate_id: data["sequence"] for candidate_id, data in candidates.items()}
         screened_ids = [candidate_id for candidate_id, data in candidates.items() if data.get("screened")]
         full_screened_ids = [candidate_id for candidate_id, data in candidates.items() if data.get("full_report") is not None]
         state["budget_total"] = session["budget_total"]
         state["budget_remaining"] = session["budget_remaining"]
         state["candidate_truths"] = truths
+        state["candidate_sequences"] = sequences
         state["screened_ids"] = screened_ids
         state["full_screened_ids"] = full_screened_ids
         state["candidate_count"] = len(candidates)
@@ -427,12 +461,13 @@ def load_environment(
     train_dataset = Dataset.from_list(build_scope05_rows(num_train_examples, train_seed, split="train"))
     eval_dataset = Dataset.from_list(build_scope05_rows(num_eval_examples, eval_seed, split="eval"))
 
-    parser = vf.XMLParser(["answer"], answer_field="answer")
+    parser = vf.XMLParser(["answer", "sequence"], answer_field="answer")
     rubric = vf.Rubric(funcs=[selection_reward, parser.get_format_reward_func()], weights=[1.0, 0.1], parser=parser)
     rubric.add_metric(chosen_true_score)
     rubric.add_metric(chosen_improvement)
     rubric.add_metric(screened_selection_metric)
     rubric.add_metric(chose_full_screened)
+    rubric.add_metric(submitted_sequence_matches_candidate)
     rubric.add_metric(budget_efficiency_metric)
     rubric.add_metric(best_screened_score_metric)
     rubric.add_metric(candidate_count_metric)

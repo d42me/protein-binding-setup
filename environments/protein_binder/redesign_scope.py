@@ -96,7 +96,7 @@ def make_scope05_prompt(spec: dict[str, Any]) -> str:
     seed_profile = analyze_sequence_profile(spec["seed_sequence"])
     return (
         "Optimize a peptide binder by iteratively redesigning a weak seed candidate under a fixed budget.\n"
-        "You cannot submit a raw sequence; you must create and screen candidates with tools, then submit the best candidate ID.\n\n"
+        "You must create and screen candidates with tools, then submit the best screened candidate together with its sequence.\n\n"
         f"Target ID: {spec['target_id']}\n"
         f"Binder length: {spec['length']}\n"
         f"Desired net charge: {spec['target_charge']:+d}\n"
@@ -117,8 +117,9 @@ def make_scope05_prompt(spec: dict[str, Any]) -> str:
         f"- C0000 sequence: {spec['seed_sequence']}\n"
         f"- C0000 profile: length={seed_profile['length']}, net_charge={seed_profile['net_charge']:+d}, "
         f"special_residue_count={seed_profile['special_residue_count']}\n\n"
-        "Goal: submit the single best screened candidate ID inside <answer> tags, e.g. <answer>C0003</answer>. "
-        "Reserve one turn for the final answer and do not spend your last turn on another tool call."
+        "Goal: submit the single best screened candidate using both tags, for example: "
+        "<answer>C0003</answer><sequence>ACDEFGHIK</sequence>. "
+        "The sequence must exactly match the submitted candidate ID. Reserve one turn for the final answer and do not spend your last turn on another tool call."
     )
 
 

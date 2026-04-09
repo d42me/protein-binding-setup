@@ -18,7 +18,7 @@ It is intentionally earlier-stage than a full de novo pipeline. The goal is to t
 ## Environment type
 - **Type**: `StatefulToolEnv`
 - **Horizon**: multi-turn, short budgeted search
-- **Final answer**: `<answer>C0003</answer>`
+- **Final answer**: `<answer>C0003</answer><sequence>ACDEFGHIK</sequence>`
 
 ## Episode design
 Each task contains:
@@ -27,7 +27,7 @@ Each task contains:
 - a fixed redesign budget,
 - residue-class and charge constraints.
 
-The hidden ground-truth scorer is the same synthetic binder proxy used to create the task, but the agent only interacts through staged tools and noisy screens.
+The hidden ground-truth scorer is the same synthetic binder proxy used to create the task, but the agent only interacts through staged tools and noisy screens. The final answer must include both the selected candidate ID and its exact sequence so the externally visible output is biologically meaningful while still preserving search bookkeeping.
 
 ## Tools
 - `list_candidates()`
@@ -58,6 +58,7 @@ Additional metrics:
 - `chosen_improvement`
 - `screened_selection_metric`
 - `chose_full_screened`
+- `submitted_sequence_matches_candidate`
 - `budget_efficiency_metric`
 - `best_screened_score_metric`
 - `candidate_count_metric`
