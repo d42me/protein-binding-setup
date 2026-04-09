@@ -1,53 +1,79 @@
 # protein-binder
 
-Synthetic peptide-binder design environment for bootstrapping protein-binding RL workflows.
+Budgeted peptide-binder redesign environment for the first realistic protein-design loop.
 
-## What this environment is
-`protein-binder` is an intentionally lightweight proxy task: the model receives a synthetic target-pocket specification and must propose a short peptide sequence that should bind well under a handcrafted biochemical heuristic.
+## Scope
+This environment implements **scope 0.5** of the broader protein-binder roadmap:
+- start from a weak seed binder,
+- redesign under a fixed compute budget,
+- use stateful tools to create and screen variants,
+- submit the best screened candidate ID.
 
-This is **not** a docking environment and should not be interpreted as a physically valid protein-design benchmark. It is a fast iteration scaffold for:
-- shaping a sequence-design interface,
-- validating tool-use behavior,
-- testing reward decomposition,
-- and debugging RL/eval pipelines before adding more realistic biology.
+It is intentionally earlier-stage than a full de novo pipeline. The goal is to train and evaluate:
+- strategic search,
+- budget-aware tool use,
+- candidate tracking,
+- and shortlist selection.
 
-## Task contract
-- **Type**: tool-use, single-agent, short-horizon
-- **Action**: output one peptide sequence in `<sequence>...</sequence>`
-- **Observation**: synthetic target description with position-wise residue-class preferences, approximate composition targets, charge target, and residue constraints
-- **Tools**:
-  - `amino_acid_reference(residue)`
-  - `sequence_profile(sequence)`
-  - `compare_to_target(sequence, target_spec_json)`
+## Environment type
+- **Type**: `StatefulToolEnv`
+- **Horizon**: multi-turn, short budgeted search
+- **Final answer**: `<answer>C0003</answer>`
+
+## Episode design
+Each task contains:
+- a synthetic target-pocket specification,
+- one weak seed candidate `C0000`,
+- a fixed redesign budget,
+- residue-class and charge constraints.
+
+The hidden ground-truth scorer is the same synthetic binder proxy used to create the task, but the agent only interacts through staged tools and noisy screens.
+
+## Tools
+- `list_candidates()`
+  - inspect the current candidate table and remaining budget
+- `design_variants(parent_id, strategy, num_variants)`
+  - create new variants from an existing candidate
+- `quick_screen(candidate_ids)`
+  - cheap/noisy scoring for triage
+- `full_screen(candidate_ids)`
+  - stronger and more expensive scoring with a fuller metric breakdown
+
+Supported design strategies:
+- `balanced`
+- `anchor`
+- `composition`
+- `charge`
+- `explore`
 
 ## Reward
-The main reward is a weighted proxy composed of:
-- position-wise class matching,
-- composition matching,
-- charge matching,
-- anchor-position quality,
-- simple stability/constraint checks,
-- and a small XML-format bonus.
+Main reward favors:
+- selecting a **screened** candidate,
+- high hidden true quality,
+- improvement over the initial seed,
+- and some budget efficiency.
 
-Metrics are also logged for:
-- `valid_sequence_metric`
-- `position_metric`
-- `composition_metric`
-- `charge_metric`
-- `anchor_metric`
-- `reference_similarity_metric`
+Additional metrics:
+- `chosen_true_score`
+- `chosen_improvement`
+- `screened_selection_metric`
+- `chose_full_screened`
+- `budget_efficiency_metric`
+- `best_screened_score_metric`
+- `candidate_count_metric`
+- `design_calls_metric`
+- `quick_screen_calls_metric`
+- `full_screen_calls_metric`
 
-## Synthetic dataset method
-Each example is generated procedurally:
-1. Sample a target-pocket template with peptide length, position preferences, anchors, and forbidden residues.
-2. Search for a high-scoring latent reference sequence by repeated constrained sampling plus local mutation.
-3. Derive visible prompt targets from that latent sequence: class counts, target charge, and anchor positions.
-4. Hide the exact reference sequence from the model and use it only as a metric for inspection.
+## Why this is useful
+This is the smallest version that already looks like a real design campaign:
+- stateful candidate table
+- redesign instead of one-shot generation
+- multi-fidelity screening
+- compute-budget tradeoffs
+- shortlist-style decision making
 
-This gives us a small, reproducible dataset with:
-- multiple valid solutions,
-- continuous reward instead of brittle exact match,
-- and meaningful tool affordances.
+That makes it a better stepping stone toward realistic binder environments than direct sequence emission.
 
 ## Quickstart
 Install locally:
@@ -56,29 +82,26 @@ Install locally:
 prime env install protein-binder
 ```
 
-Quick smoke eval:
+Smoke eval:
 
 ```bash
 prime eval run protein-binder -m openai/gpt-4.1-mini -n 5
 ```
 
-Saved-results eval:
+Config-driven eval:
 
 ```bash
-prime eval run protein-binder -m openai/gpt-4.1-mini -n 12 -s
+prime eval run configs/eval/protein-binder-baseline.toml -A
 ```
 
 ## Environment arguments
 | Arg | Type | Default | Description |
 | --- | ---- | ------- | ----------- |
-| `num_train_examples` | int | `96` | Number of synthetic training examples |
-| `num_eval_examples` | int | `24` | Number of synthetic eval examples |
-| `train_seed` | int | `7` | Train split RNG seed |
-| `eval_seed` | int | `17` | Eval split RNG seed |
-| `max_turns` | int | `4` | Maximum assistant turns including tool-use turns |
+| `num_train_examples` | int | `96` | Number of synthetic train episodes |
+| `num_eval_examples` | int | `24` | Number of synthetic eval episodes |
+| `train_seed` | int | `7` | Train RNG seed |
+| `eval_seed` | int | `17` | Eval RNG seed |
+| `max_turns` | int | `8` | Maximum assistant turns |
 
-## Recommended next steps
-1. Replace the proxy with a stronger surrogate scorer (e.g. sequence LM + structure-aware classifier).
-2. Add held-out motif families and harder OOD splits.
-3. Introduce pairwise ranking tasks or mutation trajectories.
-4. Eventually move to a stateful environment with external structure/scoring tools.
+## Next step after scope 0.5
+Move from synthetic redesign to structure-guided redesign with stronger surrogate scoring and held-out target splits.

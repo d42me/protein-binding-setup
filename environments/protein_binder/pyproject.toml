@@ -1,7 +1,7 @@
 [project]
 name = "protein-binder"
-description = "Synthetic peptide binder design environment with tool-assisted sequence analysis"
-tags = ["protein-design", "biology", "tool-use", "synthetic", "train", "eval"]
+description = "Budgeted peptide-binder redesign environment with stateful search and multi-fidelity screening"
+tags = ["protein-design", "biology", "tool-use", "stateful", "redesign", "train", "eval"]
 version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
@@ -14,7 +14,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build]
-include = ["protein_binder.py", "synthetic_dataset.py", "pyproject.toml", "README.md"]
+include = ["protein_binder.py", "redesign_scope.py", "synthetic_dataset.py", "pyproject.toml", "README.md"]
 
 [tool.verifiers.eval]
 num_examples = 12
