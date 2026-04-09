@@ -1,0 +1,7 @@
+model = "openai/gpt-4.1-mini"
+save_results = true
+rollouts_per_example = 1
+
+[[eval]]
+env_id = "protein-binder"
+num_examples = 12

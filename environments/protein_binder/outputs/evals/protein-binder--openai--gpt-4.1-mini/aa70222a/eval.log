@@ -1,0 +1,9 @@
+2026-04-08 14:59:36 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - Initializing ZMQEnvServer to serve protein-binder (env_args={}, extra_env_kwargs={})
+2026-04-08 14:59:36 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - Loading environment protein-binder with env_args={}
+2026-04-08 14:59:36 - verifiers.utils.env_utils - INFO - Loading environment: protein-binder
+2026-04-08 14:59:36 - verifiers.utils.env_utils - INFO - Using default args: train_seed=7, max_turns=4, num_train_examples=96, num_eval_examples=24, eval_seed=17
+2026-04-08 14:59:36 - verifiers.utils.env_utils - INFO - Successfully loaded environment 'protein-binder'
+2026-04-08 14:59:36 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - ZMQEnvServer started on tcp://127.0.0.1:53505
+2026-04-08 14:59:36 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - Health check responder started on tcp://127.0.0.1:53506
+2026-04-08 14:59:46 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - Pending tasks: 11, Event loop lag: mean=1ms, p99=45ms, max=45ms (n=98)
+2026-04-08 14:59:56 - verifiers.workers.server.env_server.ZMQEnvServer - INFO - Environment server shut down
