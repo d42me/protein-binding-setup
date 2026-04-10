@@ -1,0 +1,27 @@
+[project]
+name = "protein-binder-monomer-real"
+description = "Remote RTX6000-backed monomer-only protein binder environment with real ColabFold, RFdiffusion, and ProteinMPNN tools"
+tags = ["protein-design", "biology", "tool-use", "monomer", "remote-gpu", "train", "eval"]
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=3.0.0",
+    "verifiers>=0.1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "protein_binder_monomer_real/**",
+    "experimental_h200_sandbox/**",
+    "pyproject.toml",
+    "README.md",
+    "Dockerfile",
+]
+
+[tool.verifiers.eval]
+num_examples = 1
+rollouts_per_example = 1

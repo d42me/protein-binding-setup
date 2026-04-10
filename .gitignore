@@ -1,7 +1,14 @@
 # outputs from `prime eval run`
 outputs/
 environments/*/outputs/
+environments/*/dist/
+environments/*/.prime/
+logs/
+
+# macOS artifacts
+.DS_Store
 
 # python build artifacts
 __pycache__/
-environments/*/__pycache__/
+**/__pycache__/
+*.pyc
