@@ -1,0 +1,28 @@
+[project]
+name = "protein-binder-pipeline"
+description = "Sandbox-backed linear protein-binder pipeline with synthetic AlphaFold2, RFdiffusion, ProteinMPNN, and AlphaFold-Multimer stages"
+tags = ["protein-design", "biology", "sandbox", "tool-use", "pipeline", "train", "eval"]
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "datasets>=3.0.0",
+    "verifiers>=0.1.11",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+include = [
+    "protein_binder_pipeline.py",
+    "pipeline_tasks.py",
+    "sandbox_runner.py",
+    "pyproject.toml",
+    "README.md",
+    "Dockerfile",
+]
+
+[tool.verifiers.eval]
+num_examples = 12
+rollouts_per_example = 1

@@ -1,0 +1,19 @@
+provider = "prime"
+save_results = true
+rollouts_per_example = 1
+temperature = 0.0
+
+[[eval]]
+env_id = "protein-binder-pipeline"
+model = "openai/gpt-4.1-mini"
+num_examples = 20
+
+[[eval]]
+env_id = "protein-binder-pipeline"
+model = "openai/gpt-4.1-nano"
+num_examples = 20
+
+[[eval]]
+env_id = "protein-binder-pipeline"
+model = "qwen/qwen3-30b-a3b-instruct-2507"
+num_examples = 20

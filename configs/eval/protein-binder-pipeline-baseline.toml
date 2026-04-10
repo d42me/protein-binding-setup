@@ -1,0 +1,8 @@
+model = "openai/gpt-4.1-mini"
+save_results = true
+rollouts_per_example = 1
+temperature = 0.0
+
+[[eval]]
+env_id = "protein-binder-pipeline"
+num_examples = 12
