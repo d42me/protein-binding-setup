@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import io
 import json
+import os
 import shlex
+import shutil
+import tarfile
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
 
+import paramiko
 import verifiers as vf
 
 from .tasks import SYSTEM_PROMPT, build_datasets
@@ -131,6 +138,8 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         self.sync_support_on_start = sync_support_on_start
         self._support_sync_lock = asyncio.Lock()
         self._support_synced = False
+        self._ssh_key_dir: Path | None = None
+        self._ssh_key_path: Path | None = None
 
         self.add_tool(self.run_target_monomer, args_to_skip=["state"])
         self.add_tool(self.run_rfdiffusion, args_to_skip=["state"])
@@ -138,13 +147,91 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         self.add_tool(self.run_binder_monomer, args_to_skip=["state"])
         self.add_tool(self.summarize_candidates, args_to_skip=["state"])
 
-    async def _run_local_command(self, command: list[str]) -> str:
+    def _ensure_ssh_key_path(self) -> Path | None:
+        if self._ssh_key_path is not None:
+            return self._ssh_key_path
+
+        key_text = os.environ.get("PROTEIN_BINDER_SSH_PRIVATE_KEY")
+        key_b64 = os.environ.get("PROTEIN_BINDER_SSH_PRIVATE_KEY_B64")
+        if key_b64:
+            key_text = base64.b64decode(key_b64).decode()
+        if not key_text:
+            return None
+
+        key_dir = Path(tempfile.mkdtemp(prefix="protein-binder-ssh-"))
+        key_path = key_dir / "id_ed25519"
+        key_path.write_text(key_text)
+        key_path.chmod(0o600)
+        self._ssh_key_dir = key_dir
+        self._ssh_key_path = key_path
+        return key_path
+
+    def _ssh_command_prefix(self) -> list[str]:
+        command = [
+            "ssh",
+            "-o",
+            "BatchMode=yes",
+            "-o",
+            "StrictHostKeyChecking=no",
+        ]
+        key_path = self._ensure_ssh_key_path()
+        if key_path is not None:
+            command.extend(["-i", str(key_path)])
+        command.append(self.remote_host)
+        return command
+
+    def _parse_remote_host(self) -> tuple[str, str, int]:
+        if "@" in self.remote_host:
+            username, host_part = self.remote_host.split("@", 1)
+        else:
+            username, host_part = "ubuntu", self.remote_host
+        if ":" in host_part:
+            host, port_text = host_part.rsplit(":", 1)
+            if port_text.isdigit():
+                return username, host, int(port_text)
+        return username, host_part, 22
+
+    def _connect_paramiko_client(self) -> paramiko.SSHClient:
+        key_path = self._ensure_ssh_key_path()
+        if key_path is None:
+            raise RuntimeError("Paramiko fallback requires PROTEIN_BINDER_SSH_PRIVATE_KEY or PROTEIN_BINDER_SSH_PRIVATE_KEY_B64")
+
+        username, hostname, port = self._parse_remote_host()
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        client.connect(
+            hostname=hostname,
+            port=port,
+            username=username,
+            key_filename=str(key_path),
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=30,
+        )
+        return client
+
+    def _run_paramiko_command_sync(self, remote_command: str) -> str:
+        client = self._connect_paramiko_client()
+        command = ["paramiko", self.remote_host, remote_command]
+        try:
+            _, stdout, stderr = client.exec_command(f"bash -c {shlex.quote(remote_command)}")
+            out_text = stdout.read().decode()
+            err_text = stderr.read().decode()
+            returncode = stdout.channel.recv_exit_status()
+            if returncode != 0:
+                raise CommandError(command, returncode, out_text, err_text)
+            return out_text
+        finally:
+            client.close()
+
+    async def _run_local_command(self, command: list[str], *, stdin: bytes | None = None) -> str:
         process = await asyncio.create_subprocess_exec(
             *command,
+            stdin=asyncio.subprocess.PIPE if stdin is not None else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await process.communicate(stdin)
         out_text = stdout.decode()
         err_text = stderr.decode()
         if process.returncode != 0:
@@ -152,13 +239,12 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         return out_text
 
     async def _run_remote_command(self, remote_command: str) -> str:
-        return await self._run_local_command([
-            "ssh",
-            "-o",
-            "BatchMode=yes",
-            self.remote_host,
-            f"bash -c {shlex.quote(remote_command)}",
-        ])
+        if shutil.which("ssh"):
+            return await self._run_local_command([
+                *self._ssh_command_prefix(),
+                f"bash -c {shlex.quote(remote_command)}",
+            ])
+        return await asyncio.to_thread(self._run_paramiko_command_sync, remote_command)
 
     async def _read_remote_json(self, remote_path: str) -> Any:
         output = await self._run_remote_command(f"cat {shlex.quote(remote_path)}")
@@ -170,22 +256,62 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         except CommandError as exc:
             return exc.stdout or exc.stderr
 
+    def _sync_support_via_paramiko_sync(self, archive_bytes: bytes) -> None:
+        client = self._connect_paramiko_client()
+        remote_archive_path = f"/tmp/protein-binder-support-{uuid.uuid4().hex}.tar.gz"
+        try:
+            with client.open_sftp() as sftp:
+                with sftp.file(remote_archive_path, "wb") as remote_file:
+                    remote_file.write(archive_bytes)
+            _, stdout, stderr = client.exec_command(
+                "bash -c "
+                + shlex.quote(
+                    f"rm -rf {shlex.quote(self.remote_support_dir)} && "
+                    f"mkdir -p {shlex.quote(self.remote_support_dir)} && "
+                    f"tar -xzf {shlex.quote(remote_archive_path)} -C {shlex.quote(self.remote_support_dir)} && "
+                    f"rm -f {shlex.quote(remote_archive_path)}"
+                )
+            )
+            out_text = stdout.read().decode()
+            err_text = stderr.read().decode()
+            returncode = stdout.channel.recv_exit_status()
+            if returncode != 0:
+                raise CommandError(["paramiko-sync", self.remote_host], returncode, out_text, err_text)
+        finally:
+            try:
+                client.exec_command(f"rm -f {shlex.quote(remote_archive_path)}")
+            except Exception:
+                pass
+            client.close()
+
     async def _ensure_remote_support_synced(self) -> None:
         if not self.sync_support_on_start or self._support_synced:
             return
         async with self._support_sync_lock:
             if self._support_synced:
                 return
-            await self._run_remote_command(f"mkdir -p {shlex.quote(self.remote_support_dir)}")
-            await self._run_local_command(
-                [
-                    "rsync",
-                    "-az",
-                    "--delete",
-                    f"{self.local_support_dir}/",
-                    f"{self.remote_host}:{self.remote_support_dir}/",
-                ]
-            )
+            buffer = io.BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w:gz") as archive:
+                for child in sorted(self.local_support_dir.iterdir()):
+                    archive.add(child, arcname=child.name)
+            archive_bytes = buffer.getvalue()
+            if shutil.which("ssh"):
+                await self._run_local_command(
+                    [
+                        *self._ssh_command_prefix(),
+                        (
+                            "bash -c "
+                            + shlex.quote(
+                                f"rm -rf {shlex.quote(self.remote_support_dir)} && "
+                                f"mkdir -p {shlex.quote(self.remote_support_dir)} && "
+                                f"tar -xzf - -C {shlex.quote(self.remote_support_dir)}"
+                            )
+                        ),
+                    ],
+                    stdin=archive_bytes,
+                )
+            else:
+                await asyncio.to_thread(self._sync_support_via_paramiko_sync, archive_bytes)
             self._support_synced = True
 
     async def setup_state(self, state: vf.State, **kwargs) -> vf.State:
@@ -204,14 +330,21 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         state["target_mean_plddt"] = 0.0
 
         gate = task_info["quality_gate"]
+        remote_target_fasta = f"{remote_run_dir}/inputs/target_sequence.fasta"
+        fasta_content = f">{task_info['target_id']}\n{task_info['target_sequence']}\n"
+        write_fasta_code = (
+            "from pathlib import Path; "
+            f"Path({json.dumps(remote_target_fasta)}).parent.mkdir(parents=True, exist_ok=True); "
+            f"Path({json.dumps(remote_target_fasta)}).write_text({json.dumps(fasta_content)})"
+        )
         init_parts = [
             "python3",
             shlex.quote(f"{self.remote_support_dir}/run_monomer_pipeline.py"),
             "init-run",
             "--run-dir",
             shlex.quote(remote_run_dir),
-            "--target-pdb",
-            shlex.quote(task_info["remote_target_pdb"]),
+            "--target-sequence-fasta",
+            shlex.quote(remote_target_fasta),
             "--target-chain",
             shlex.quote(task_info["target_chain"]),
             "--hotspots",
@@ -246,7 +379,11 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
             "2>&1",
         ]
         try:
-            await self._run_remote_command(f"mkdir -p {shlex.quote(remote_run_dir)}/state && {' '.join(init_parts)}")
+            await self._run_remote_command(
+                f"mkdir -p {shlex.quote(remote_run_dir)}/state && "
+                f"python3 -c {shlex.quote(write_fasta_code)} && "
+                f"{' '.join(init_parts)}"
+            )
         except CommandError:
             init_log = await self._tail_remote_file(f"{remote_run_dir}/state/init-run.log")
             raise RuntimeError(f"Failed to initialize remote run.\n{init_log}")
@@ -262,6 +399,13 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
                 await self._run_remote_command(f"rm -rf {shlex.quote(remote_run_dir)}")
             except CommandError:
                 pass
+
+    @vf.teardown
+    async def cleanup_ssh_key(self):
+        if self._ssh_key_dir is not None:
+            shutil.rmtree(self._ssh_key_dir, ignore_errors=True)
+        self._ssh_key_dir = None
+        self._ssh_key_path = None
 
     def update_tool_args(
         self,
@@ -455,9 +599,14 @@ def load_environment(
     remote_run_root: str = "/home/ubuntu/protein-runtime/rollouts/protein-binder-monomer-real",
     keep_remote_artifacts: bool = False,
     sync_support_on_start: bool = True,
+    task_library: str = "all",
 ) -> vf.Environment:
     support_dir = Path(__file__).resolve().parent / "support"
-    train_dataset, eval_dataset = build_datasets(num_train_examples, num_eval_examples)
+    train_dataset, eval_dataset = build_datasets(
+        num_train_examples,
+        num_eval_examples,
+        task_library=task_library,
+    )
 
     parser = vf.XMLParser(["sequence"], answer_field="sequence")
     rubric = vf.Rubric(

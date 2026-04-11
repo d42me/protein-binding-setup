@@ -83,6 +83,33 @@ This keeps current Blackwell runs safe while making it straightforward to scale 
   - main orchestration CLI and stage commands
 - `run_rfdiffusion_blackwell.py`
   - wrapper that restores `torch.load(..., weights_only=False)` behavior needed by RFdiffusion under newer PyTorch
+- `scout_ronig_dataset.py`
+  - scouts `ronig/protein_binding_sequences` for monomer-harness-compatible target/peptide pairs
+  - reports staged filter counts, length-window tradeoffs, and an optional structure-backed hotspot viability sample
+- `curate_ronig_dataset.py`
+  - turns a conservative ronig subset into bundled environment tasks with sequence-backed targets and sequential hotspot labels
+  - applies a second-pass structural filter, derives top-contact hotspots, and keeps one task per exact receptor and peptide sequence for diversity
+
+## Dataset scouting example
+Use this before wiring a larger public dataset into the environment:
+
+```bash
+python experiments/real_monomer_harness/scout_ronig_dataset.py \
+  --min-peptide-length 30 \
+  --max-peptide-length 50 \
+  --structure-sample-size 20 \
+  --output-jsonl ./artifacts/dataset_scout/ronig_30_50_candidates.jsonl
+```
+
+This gives a conservative candidate manifest for the current monomer harness and estimates how often filtered examples still expose at least a few receptor interface residues that can be turned into sequential hotspot prompts.
+
+To materialize the bundled ronig task library used by `protein-binder-monomer-real`:
+
+```bash
+python experiments/real_monomer_harness/curate_ronig_dataset.py \
+  --max-tasks 12 \
+  --output ./environments/protein_binder_monomer_real/protein_binder_monomer_real/data/ronig_curated_tasks.json
+```
 
 ## Remote assumptions
 Default paths assume the Blackwell host has already been prepared with:

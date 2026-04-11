@@ -41,16 +41,37 @@ The task currently uses the tuned insulin gate:
 - monomer plausibility score >= 0.72
 
 ## Current dataset
-This is intentionally small and real-tool focused.
+The environment now supports three task libraries via `task_library`:
+- `proven` — the original 3 hand-validated RFdiffusion examples
+- `ronig` — a bundled curated subset derived from `ronig/protein_binding_sequences`
+- `all` — the default mix of `proven + ronig`
 
-Current rows are repeated insulin-chain-A tasks that point to:
-- remote target PDB: `/home/ubuntu/protein-runtime/work/input_pdbs/insulin_target.pdb`
-- hotspots: `A59,A83,A91`
-- binder length range: `40-55`
-- RFdiffusion designs: `8`
-- ProteinMPNN sequences per backbone: `8`
+### Proven library
+These rows come from a curated **real target set** built from RFdiffusion example structures:
+- insulin receptor target
+- GABARAP target
+- 1YCR target
 
-This is enough for smoke evals and early rollout plumbing, not yet a broad scientific benchmark.
+### ronig curated library
+The bundled ronig subset is produced offline by:
+- `experiments/real_monomer_harness/scout_ronig_dataset.py`
+- `experiments/real_monomer_harness/curate_ronig_dataset.py`
+
+Current curation heuristics are intentionally conservative:
+- peptide length `30-50`
+- receptor length `50-400`
+- peptide shorter than receptor
+- remove self-like receptor/peptide pairs
+- dedupe unordered PDB chain pairs
+- require exact PDB ATOM-derived sequence agreement for both chains
+- remove highly hydrophobic / transmembrane-like chains
+- require at least `5` receptor interface residues at `6A`
+- derive the top `3` receptor hotspots from residue-level contact counts
+- keep one task per exact receptor sequence and one per exact peptide sequence for diversity
+
+Each rollout now materializes the target from the bundled `target_sequence` directly, so hosted workers do not depend on a pre-existing remote PDB path for dataset tasks.
+
+This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
 ## Quickstart
 Install locally:
@@ -74,6 +95,13 @@ prime eval run protein-binder-monomer-real \
   -x '{"keep_remote_artifacts": true}'
 ```
 
+Hosted evals can use the same SSH-backed pod path.
+For hosted runs, provide an environment secret or custom secret named:
+- `PROTEIN_BINDER_SSH_PRIVATE_KEY_B64`
+
+This should contain a base64-encoded private key that is authorized on the target RTX 6000 pod.
+The environment will materialize that key at runtime and use it for both SSH and support-file sync.
+
 ## Environment arguments
 | Arg | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -85,6 +113,7 @@ prime eval run protein-binder-monomer-real \
 | `remote_run_root` | str | `/home/ubuntu/protein-runtime/rollouts/protein-binder-monomer-real` | Root directory for per-rollout remote artifacts |
 | `keep_remote_artifacts` | bool | `false` | Keep remote run directories after rollout cleanup |
 | `sync_support_on_start` | bool | `true` | Rsync the packaged harness support files to the remote host during setup |
+| `task_library` | str | `"all"` | Which bundled task pool to use: `proven`, `ronig`, or `all` |
 
 ## Metrics
 | Metric | Meaning |

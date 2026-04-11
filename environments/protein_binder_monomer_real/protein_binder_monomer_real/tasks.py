@@ -1,33 +1,79 @@
 from __future__ import annotations
 
+import json
 from copy import deepcopy
+from pathlib import Path
+
 from datasets import Dataset
 
-INSULIN_TARGET_SEQUENCE = (
-    "EVCPGMDIRNNLTRLHELENCSVIEGHLQILLMFKTRPEDFRDLSFPKLIMITDYLLLFRVYGLESLKDLFPNLTVIRGSRLFFNYALVIFEMVHLKELGLYNLMNITRGSVRIEKNNELCYLATIDWSRILDSVEDNHIVLNKDDNEEC"
-)
-
-BASE_TASK = {
-    "task": "protein-binder-monomer-real",
-    "target_id": "insulin-chain-a",
-    "target_sequence": INSULIN_TARGET_SEQUENCE,
-    "remote_target_pdb": "/home/ubuntu/protein-runtime/work/input_pdbs/insulin_target.pdb",
-    "target_chain": "A",
-    "hotspots": ["A59", "A83", "A91"],
-    "binder_length_min": 40,
-    "binder_length_max": 55,
-    "num_designs": 8,
-    "num_seqs_per_backbone": 8,
-    "candidate_batch_size": 16,
-    "quality_gate": {
-        "min_target_mean_plddt": 80.0,
-        "min_binder_mean_plddt": 80.0,
-        "max_binder_distance_rmse": 1.5,
-        "min_hotspot_fraction": 0.33,
-        "min_interface_residue_contacts": 10,
-        "score_threshold": 0.72,
+PROVEN_TASKS = [
+    {
+        "task": "protein-binder-monomer-real",
+        "target_id": "rfdiffusion-insulin-chain-a",
+        "target_sequence": "EVCPGMDIRNNLTRLHELENCSVIEGHLQILLMFKTRPEDFRDLSFPKLIMITDYLLLFRVYGLESLKDLFPNLTVIRGSRLFFNYALVIFEMVHLKELGLYNLMNITRGSVRIEKNNELCYLATIDWSRILDSVEDNHIVLNKDDNEEC",
+        "target_chain": "A",
+        "hotspots": ["A59", "A83", "A91"],
+        "binder_length_min": 40,
+        "binder_length_max": 55,
+        "num_designs": 8,
+        "num_seqs_per_backbone": 8,
+        "candidate_batch_size": 16,
+        "dataset_source": "RFdiffusion examples/design_ppi.sh",
+        "quality_gate": {
+            "min_target_mean_plddt": 80.0,
+            "min_binder_mean_plddt": 80.0,
+            "max_binder_distance_rmse": 1.5,
+            "min_hotspot_fraction": 0.33,
+            "min_interface_residue_contacts": 10,
+            "score_threshold": 0.72,
+        },
     },
-}
+    {
+        "task": "protein-binder-monomer-real",
+        "target_id": "rfdiffusion-gabarap-chain-a",
+        "target_sequence": "MKFVYKEEHPFEKRRSEGEKIRKKYPDRVPVIVEKAPKARIGDLDKKKYLVPSDLTVGQFYFLIRKRIHLRAEDALFFFVNNVIPPTSATMGQLYQEHHEEDFFLYIAYSDESVY",
+        "target_chain": "A",
+        "hotspots": ["A46", "A48", "A60"],
+        "binder_length_min": 40,
+        "binder_length_max": 55,
+        "num_designs": 8,
+        "num_seqs_per_backbone": 8,
+        "candidate_batch_size": 16,
+        "dataset_source": "RFdiffusion examples/design_macrocyclic_binder.sh with sequential hotspot remap",
+        "quality_gate": {
+            "min_target_mean_plddt": 80.0,
+            "min_binder_mean_plddt": 80.0,
+            "max_binder_distance_rmse": 1.5,
+            "min_hotspot_fraction": 0.33,
+            "min_interface_residue_contacts": 10,
+            "score_threshold": 0.72,
+        },
+    },
+    {
+        "task": "protein-binder-monomer-real",
+        "target_id": "rfdiffusion-1ycr-chain-a",
+        "target_sequence": "ETLVRPKPLLLKLLKSVGAQKDTYTMKEVLFYLGQYIMTKRLYDEKQQHIVYCSNDLLGDLFGVPSFSVKEHRKIYTMIYRNLVV",
+        "target_chain": "A",
+        "hotspots": ["A27", "A47", "A70"],
+        "binder_length_min": 40,
+        "binder_length_max": 55,
+        "num_designs": 8,
+        "num_seqs_per_backbone": 8,
+        "candidate_batch_size": 16,
+        "dataset_source": "RFdiffusion examples/input_pdbs/1YCR.pdb with interface-derived sequential hotspots",
+        "quality_gate": {
+            "min_target_mean_plddt": 80.0,
+            "min_binder_mean_plddt": 80.0,
+            "max_binder_distance_rmse": 1.5,
+            "min_hotspot_fraction": 0.33,
+            "min_interface_residue_contacts": 10,
+            "score_threshold": 0.72,
+        },
+    },
+]
+
+CURATED_RONIG_TASKS_PATH = Path(__file__).resolve().parent / "data" / "ronig_curated_tasks.json"
+SUPPORTED_TASK_LIBRARIES = {"proven", "ronig", "all"}
 
 SYSTEM_PROMPT = """You are running a real monomer-only protein binder design pipeline on a remote RTX 6000 GPU host.
 Follow the tools in strict order.
@@ -44,19 +90,50 @@ If summarize_candidates reports at least one passing candidate, submit one of th
 Reserve one turn for the final answer."""
 
 
+def load_curated_ronig_tasks() -> list[dict]:
+    return json.loads(CURATED_RONIG_TASKS_PATH.read_text())
+
+
+def get_task_library(task_library: str = "all") -> list[dict]:
+    if task_library not in SUPPORTED_TASK_LIBRARIES:
+        supported = ", ".join(sorted(SUPPORTED_TASK_LIBRARIES))
+        raise ValueError(f"Unsupported task_library={task_library!r}. Expected one of: {supported}")
+    if task_library == "proven":
+        return deepcopy(PROVEN_TASKS)
+    if task_library == "ronig":
+        return deepcopy(load_curated_ronig_tasks())
+    return deepcopy(PROVEN_TASKS) + deepcopy(load_curated_ronig_tasks())
+
+
 def make_prompt(task: dict) -> str:
     hotspots = ", ".join(task["hotspots"])
     gate = task["quality_gate"]
+    optional_lines: list[str] = []
+    if task.get("source_pdb_id"):
+        optional_lines.append(f"Source PDB: {task['source_pdb_id']}")
+    if task.get("source_peptide_length"):
+        optional_lines.append(f"Known peptide binder length: {task['source_peptide_length']}")
+    if task.get("source_receptor_chain") and task.get("source_peptide_chain"):
+        optional_lines.append(
+            "Source complex chains: "
+            f"receptor {task['source_receptor_chain']}, peptide {task['source_peptide_chain']}"
+        )
+    optional_block = "\n".join(optional_lines)
+    if optional_block:
+        optional_block = optional_block + "\n"
+
     return (
         "Run the monomer-only protein binder pipeline using the provided tools.\n"
-        "The remote rollout is preconfigured with a target structure source, hotspot set, and search budget.\n"
+        "The remote rollout is preconfigured with a target sequence, hotspot set, and search budget.\n"
         "Your goal is to produce a binder sequence that passes the monomer-only quality gate.\n\n"
         f"Target ID: {task['target_id']}\n"
+        f"Dataset source: {task['dataset_source']}\n"
         f"Target chain: {task['target_chain']}\n"
         f"Hotspots: {hotspots}\n"
         f"Binder length range: {task['binder_length_min']}-{task['binder_length_max']}\n"
         f"RFdiffusion backbones to sample: {task['num_designs']}\n"
-        f"ProteinMPNN sequences per backbone: {task['num_seqs_per_backbone']}\n\n"
+        f"ProteinMPNN sequences per backbone: {task['num_seqs_per_backbone']}\n"
+        f"{optional_block}\n"
         "Monomer-only quality gate:\n"
         f"- target mean pLDDT >= {gate['min_target_mean_plddt']}\n"
         f"- binder mean pLDDT >= {gate['min_binder_mean_plddt']}\n"
@@ -69,11 +146,12 @@ def make_prompt(task: dict) -> str:
     )
 
 
-def build_task_rows(num_examples: int, split: str) -> list[dict]:
+def build_task_rows(num_examples: int, split: str, task_library: str = "all") -> list[dict]:
+    task_pool = get_task_library(task_library)
     rows: list[dict] = []
     for index in range(num_examples):
-        task = deepcopy(BASE_TASK)
-        task["target_id"] = f"{split}-insulin-{index:03d}"
+        task = deepcopy(task_pool[index % len(task_pool)])
+        task["target_id"] = f"{split}-{task['target_id']}-{index:03d}"
         rows.append(
             {
                 "question": make_prompt(task),
@@ -85,8 +163,12 @@ def build_task_rows(num_examples: int, split: str) -> list[dict]:
     return rows
 
 
-def build_datasets(num_train_examples: int, num_eval_examples: int) -> tuple[Dataset, Dataset]:
+def build_datasets(
+    num_train_examples: int,
+    num_eval_examples: int,
+    task_library: str = "all",
+) -> tuple[Dataset, Dataset]:
     return (
-        Dataset.from_list(build_task_rows(num_train_examples, split="train")),
-        Dataset.from_list(build_task_rows(num_eval_examples, split="eval")),
+        Dataset.from_list(build_task_rows(num_train_examples, split="train", task_library=task_library)),
+        Dataset.from_list(build_task_rows(num_eval_examples, split="eval", task_library=task_library)),
     )
