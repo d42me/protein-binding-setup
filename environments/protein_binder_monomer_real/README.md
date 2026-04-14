@@ -112,6 +112,187 @@ prime eval run protein-binder-monomer-real \
   -x '{"keep_remote_artifacts": true}'
 ```
 
+## How to replicate results
+
+This section is the shortest path to reproducing the environment behavior seen in local evals, hosted evals, and the bundled dataset/task curation.
+
+### 1. Reproduce a local smoke run
+From the repo root:
+
+```bash
+prime env install protein-binder-monomer-real
+prime eval run configs/eval/protein-binder-monomer-real-smoke.toml -A
+```
+
+This uses the checked-in smoke config:
+- env: `protein-binder-monomer-real`
+- model: `gpt-4.1-mini`
+- examples: `1`
+- rollouts per example: `1`
+
+If you want to inspect the exact remote rollout artifacts afterward:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -x '{"keep_remote_artifacts": true, "task_library": "proven"}'
+```
+
+### 2. Reproduce the current default environment behavior
+The current checked-in defaults are approximately:
+- task library: `all`
+- train rows: `4`
+- eval rows: `1`
+- max turns: `8`
+- reward design: dense candidate-ID selection (`v0.2`)
+
+To run that behavior explicitly instead of relying on defaults:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -a '{"num_train_examples":4,"num_eval_examples":1,"max_turns":8,"task_library":"all"}'
+```
+
+To lock the task set to the original hand-curated examples:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -a '{"task_library":"proven"}'
+```
+
+To reproduce the broader curated dataset setting:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -a '{"task_library":"ronig"}'
+```
+
+### 3. Reproduce hosted runs
+Hosted runs need the same environment installed locally plus the required hosted secrets.
+
+#### SSH transport
+Provide:
+- `PROTEIN_BINDER_SSH_PRIVATE_KEY_B64`
+
+Then launch:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  --hosted \
+  -a '{"task_library":"proven","sync_support_on_start":true}' \
+  -A
+```
+
+#### HTTP API transport
+If the remote host is serving `support/api_server.py`, provide:
+- `PROTEIN_BINDER_API_TOKEN`
+- `PROTEIN_BINDER_REMOTE_API_BASE_URL`
+
+Then launch:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  --hosted \
+  -a '{"task_library":"proven","remote_api_base_url":"https://YOUR-HOST"}' \
+  -A
+```
+
+In practice, most hosted runs rely on the environment variable / secret `PROTEIN_BINDER_REMOTE_API_BASE_URL`, so you can usually omit the explicit arg and just run:
+
+```bash
+prime eval run protein-binder-monomer-real -m gpt-4.1-mini -n 1 --hosted -A
+```
+
+### 4. Reproduce training configs used in this repo
+The repo keeps multiple historical training configs under `configs/rl/`.
+
+Example:
+
+```bash
+prime rl run configs/rl/protein-binder-monomer-real-qwen4b-instruct-proven-bqxlike-v018.toml
+```
+
+That config currently pins:
+- model: `Qwen/Qwen3-4B-Instruct-2507`
+- env id: `d42me/protein-binder-monomer-real@0.1.8`
+- task library: `proven`
+- rollouts per example: `2`
+- batch size: `2`
+
+If you want exact reproducibility, record all of:
+- repo commit SHA
+- environment version in the config (`@...`)
+- task library (`proven`, `ronig`, or `all`)
+- transport mode (SSH vs HTTP API)
+- remote host / remote API deployment version
+- whether `sync_support_on_start` was enabled
+
+### 5. Reproduce the curated ronig task library
+The bundled `ronig` library is not magic; it is produced offline from the scouting + curation scripts in `experiments/real_monomer_harness/`.
+
+To regenerate the conservative task library used by the environment:
+
+```bash
+python experiments/real_monomer_harness/curate_ronig_dataset.py \
+  --max-tasks 36 \
+  --output ./environments/protein_binder_monomer_real/protein_binder_monomer_real/data/ronig_curated_tasks.json
+```
+
+To scout the upstream dataset before curation:
+
+```bash
+python experiments/real_monomer_harness/scout_ronig_dataset.py \
+  --min-peptide-length 30 \
+  --max-peptide-length 50 \
+  --structure-sample-size 20 \
+  --output-jsonl ./artifacts/dataset_scout/ronig_30_50_candidates.jsonl
+```
+
+### 6. Reproduce the remote API deployment
+From the support directory on the remote host, run the FastAPI wrapper with a bearer token configured:
+
+```bash
+cd environments/protein_binder_monomer_real/protein_binder_monomer_real/support
+export PROTEIN_BINDER_API_TOKEN=...
+export PROTEIN_BINDER_API_EXECUTOR=local
+uvicorn api_server:APP --host 0.0.0.0 --port 8000
+```
+
+For SLURM-backed execution, switch the executor and set the server-side partition variables before starting the API process:
+
+```bash
+cd environments/protein_binder_monomer_real/protein_binder_monomer_real/support
+export PROTEIN_BINDER_API_TOKEN=...
+export PROTEIN_BINDER_API_EXECUTOR=slurm
+export PROTEIN_BINDER_API_SLURM_GPU_PARTITION=...
+export PROTEIN_BINDER_API_SLURM_CPU_PARTITION=...
+uvicorn api_server:APP --host 0.0.0.0 --port 8000
+```
+
+### 7. What to log when claiming a result is reproduced
+At minimum, save:
+- Prime evaluation ID
+- repo commit SHA
+- environment version / env ID
+- model name
+- task library
+- transport mode
+- whether remote artifacts were kept
+- remote API executor mode if HTTP API was used
+
+Without those, two runs can look similar while still differing in important ways.
+
 Hosted evals can use either transport:
 
 ### SSH mode
