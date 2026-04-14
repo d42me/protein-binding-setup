@@ -76,18 +76,20 @@ CURATED_RONIG_TASKS_PATH = Path(__file__).resolve().parent / "data" / "ronig_cur
 SUPPORTED_TASK_LIBRARIES = {"proven", "ronig", "all"}
 
 SYSTEM_PROMPT = """You are running a real monomer-only protein binder design pipeline on a remote RTX 6000 GPU host.
-Follow the tools in strict order.
-Use all stages exactly once:
-1. run_target_monomer
-2. run_rfdiffusion
-3. run_proteinmpnn
-4. run_binder_monomer
-5. summarize_candidates
-Then answer with only the final passing binder sequence as:
-<sequence>SEQUENCE</sequence>
-Do not add prose.
-If summarize_candidates reports at least one passing candidate, submit one of those passing sequences.
-Reserve one turn for the final answer."""
+Protocol:
+- Use exactly one tool call per assistant turn while tools remain.
+- Do not explain the plan, restate the task, or add prose before tool calls.
+- Call the tools in this exact order and exactly once:
+  1. run_target_monomer
+  2. run_rfdiffusion
+  3. run_proteinmpnn
+  4. run_binder_monomer
+  5. summarize_candidates
+- After summarize_candidates, answer with only:
+<candidate_id>CANDIDATE_ID</candidate_id>
+- Your job is to choose the strongest candidate ID from the surfaced metrics.
+- Do not output raw sequence text in the final answer.
+- Reserve the final turn for the <candidate_id> answer only."""
 
 
 def load_curated_ronig_tasks() -> list[dict]:
@@ -108,33 +110,15 @@ def get_task_library(task_library: str = "all") -> list[dict]:
 def make_prompt(task: dict) -> str:
     hotspots = ", ".join(task["hotspots"])
     gate = task["quality_gate"]
-    optional_lines: list[str] = []
-    if task.get("source_pdb_id"):
-        optional_lines.append(f"Source PDB: {task['source_pdb_id']}")
-    if task.get("source_peptide_length"):
-        optional_lines.append(f"Known peptide binder length: {task['source_peptide_length']}")
-    if task.get("source_receptor_chain") and task.get("source_peptide_chain"):
-        optional_lines.append(
-            "Source complex chains: "
-            f"receptor {task['source_receptor_chain']}, peptide {task['source_peptide_chain']}"
-        )
-    optional_block = "\n".join(optional_lines)
-    if optional_block:
-        optional_block = optional_block + "\n"
 
     return (
-        "Run the monomer-only protein binder pipeline using the provided tools.\n"
-        "The remote rollout is preconfigured with a target sequence, hotspot set, and search budget.\n"
-        "Your goal is to produce a binder sequence that passes the monomer-only quality gate.\n\n"
+        "Use the staged tools to find and select the strongest binder candidate from the monomer-only search results.\n"
+        "While tools remain, respond with a tool call only. Do not narrate.\n\n"
         f"Target ID: {task['target_id']}\n"
-        f"Dataset source: {task['dataset_source']}\n"
-        f"Target chain: {task['target_chain']}\n"
         f"Hotspots: {hotspots}\n"
         f"Binder length range: {task['binder_length_min']}-{task['binder_length_max']}\n"
-        f"RFdiffusion backbones to sample: {task['num_designs']}\n"
-        f"ProteinMPNN sequences per backbone: {task['num_seqs_per_backbone']}\n"
-        f"{optional_block}\n"
-        "Monomer-only quality gate:\n"
+        f"Search budget: {task['num_designs']} backbones, {task['num_seqs_per_backbone']} sequences per backbone\n"
+        "Quality gate:\n"
         f"- target mean pLDDT >= {gate['min_target_mean_plddt']}\n"
         f"- binder mean pLDDT >= {gate['min_binder_mean_plddt']}\n"
         f"- binder distance RMSE <= {gate['max_binder_distance_rmse']}\n"
@@ -155,7 +139,7 @@ def build_task_rows(num_examples: int, split: str, task_library: str = "all") ->
         rows.append(
             {
                 "question": make_prompt(task),
-                "answer": "pass",
+                "answer": "select_best_candidate_id",
                 "info": task,
                 "task": "protein-binder-monomer-real",
             }

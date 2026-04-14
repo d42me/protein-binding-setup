@@ -498,6 +498,16 @@ def write_target_fasta(config: RunConfig, inputs_dir: Path) -> dict[str, Any]:
     }
 
 
+def resolve_docker_gpu_request() -> str:
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if not visible:
+        return "all"
+    devices = [token.strip() for token in visible.split(",") if token.strip()]
+    if not devices:
+        return "all"
+    return f"device={','.join(devices)}"
+
+
 def run_colabfold_monomer(
     *,
     work_root: Path,
@@ -513,9 +523,11 @@ def run_colabfold_monomer(
             "run",
             "--rm",
             "--gpus",
-            "all",
+            resolve_docker_gpu_request(),
             "--user",
             f"{os.getuid()}:{os.getgid()}",
+            "-e",
+            f"NVIDIA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '')}",
             "-v",
             f"{cache_dir.resolve()}:/cache",
             "-v",

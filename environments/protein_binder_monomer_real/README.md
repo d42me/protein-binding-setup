@@ -12,7 +12,7 @@ Remote RTX 6000-backed **monomer-only** protein binder environment.
 This environment turns the real monomer harness into rollout tools without requiring AlphaFold-Multimer.
 
 It is intended as a stepping stone toward GPU sandbox support:
-- today, rollouts call the real pipeline over SSH on the provided RTX 6000 host
+- today, rollouts can call the real pipeline either over SSH or through an authenticated FastAPI wrapper on the provided RTX 6000 host
 - a **WIP GPU sandbox Dockerfile** is included in this directory so the dev team can try containerizing the same stack later
 
 ## Tool contract
@@ -26,10 +26,13 @@ Each rollout gets a fresh remote run directory and should use the tools in this 
 After `summarize_candidates()`, the model must answer with only:
 
 ```xml
-<sequence>SEQUENCE</sequence>
+<candidate_id>CANDIDATE_ID</candidate_id>
 ```
 
-The environment rewards the model when the submitted sequence matches **any passing candidate** from the monomer-only quality gate.
+The environment now rewards **candidate selection quality**, not raw sequence copying:
+- the model only sees stripped candidate metrics
+- raw sequences stay internal to the environment state
+- reward is dense, so selecting the best candidate scores higher than selecting a merely okay candidate
 
 ## Monomer-only quality gate
 The task currently uses the tuned insulin gate:
@@ -43,7 +46,7 @@ The task currently uses the tuned insulin gate:
 ## Current dataset
 The environment now supports three task libraries via `task_library`:
 - `proven` — the original 3 hand-validated RFdiffusion examples
-- `ronig` — a bundled curated subset derived from `ronig/protein_binding_sequences`
+- `ronig` — a bundled curated subset of **36** conservative tasks derived from `ronig/protein_binding_sequences`
 - `all` — the default mix of `proven + ronig`
 
 ### Proven library
@@ -73,6 +76,20 @@ Each rollout now materializes the target from the bundled `target_sequence` dire
 
 This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
+## Reward design (v0.2)
+The original reward saturated once the model learned to run the tools and copy any passing sequence.
+
+`v0.2` changes the task into a **selection problem**:
+- `summarize_candidates()` exposes candidate IDs plus stripped metrics
+- the final answer is a candidate ID, not a raw sequence
+- the main reward is a dense combination of:
+  - monomer plausibility score
+  - candidate rank percentile
+  - pass/fail gate bonus
+- a smaller auxiliary reward still credits pipeline progress and output formatting
+
+This makes evals and training more sensitive to candidate discrimination quality instead of pure protocol completion.
+
 ## Quickstart
 Install locally:
 
@@ -95,12 +112,43 @@ prime eval run protein-binder-monomer-real \
   -x '{"keep_remote_artifacts": true}'
 ```
 
-Hosted evals can use the same SSH-backed pod path.
-For hosted runs, provide an environment secret or custom secret named:
+Hosted evals can use either transport:
+
+### SSH mode
+Provide an environment secret or custom secret named:
 - `PROTEIN_BINDER_SSH_PRIVATE_KEY_B64`
 
 This should contain a base64-encoded private key that is authorized on the target RTX 6000 pod.
 The environment will materialize that key at runtime and use it for both SSH and support-file sync.
+
+### HTTP API mode
+If the remote host is running the packaged `support/api_server.py` FastAPI wrapper, set either:
+- `remote_api_base_url` as an environment arg, or
+- `PROTEIN_BINDER_REMOTE_API_BASE_URL` as an environment variable/hosted secret
+
+Also provide:
+- secret env var `PROTEIN_BINDER_API_TOKEN`
+
+Optional env-var overrides for hosted runs:
+- `PROTEIN_BINDER_TASK_LIBRARY`
+- `PROTEIN_BINDER_KEEP_REMOTE_ARTIFACTS`
+- `PROTEIN_BINDER_SYNC_SUPPORT_ON_START`
+
+In HTTP mode, the environment skips SSH transport entirely and calls the remote harness through the bearer-token API.
+
+The packaged API server now supports two execution backends selected by server-side env var:
+- `PROTEIN_BINDER_API_EXECUTOR=local` — existing in-process background-thread execution
+- `PROTEIN_BINDER_API_EXECUTOR=slurm` — submit each API job as a SLURM job and persist job state on disk
+
+Useful SLURM server env vars:
+- `PROTEIN_BINDER_API_JOB_STATE_DIR`
+- `PROTEIN_BINDER_API_SLURM_GPU_PARTITION`
+- `PROTEIN_BINDER_API_SLURM_CPU_PARTITION`
+- `PROTEIN_BINDER_API_SLURM_ACCOUNT`
+- `PROTEIN_BINDER_API_SLURM_QOS`
+- `PROTEIN_BINDER_API_SLURM_EXTRA_ARGS`
+
+Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stages/...`, `/v1/jobs/delete-run`, `/v1/jobs/{job_id}`), so the environment client does not need to change when the remote host switches from a single serialized worker to a SLURM-backed executor.
 
 ## Environment arguments
 | Arg | Type | Default | Description |
@@ -112,15 +160,21 @@ The environment will materialize that key at runtime and use it for both SSH and
 | `remote_support_dir` | str | `/home/ubuntu/pi-workspace/protein-binder/experiments/real_monomer_harness` | Remote path where the harness scripts are synced |
 | `remote_run_root` | str | `/home/ubuntu/protein-runtime/rollouts/protein-binder-monomer-real` | Root directory for per-rollout remote artifacts |
 | `keep_remote_artifacts` | bool | `false` | Keep remote run directories after rollout cleanup |
-| `sync_support_on_start` | bool | `true` | Rsync the packaged harness support files to the remote host during setup |
+| `sync_support_on_start` | bool | `true` | Atomically sync the packaged harness support files to the remote host during setup |
+| `remote_api_base_url` | str \| null | `null` | Optional bearer-token FastAPI endpoint for the remote harness |
+| `remote_api_token_env_var` | str | `"PROTEIN_BINDER_API_TOKEN"` | Environment variable name containing the bearer token for HTTP mode |
+| `remote_api_timeout_seconds` | int | `43200` | Socket timeout for long-running HTTP stage requests |
 | `task_library` | str | `"all"` | Which bundled task pool to use: `proven`, `ronig`, or `all` |
 
 ## Metrics
 | Metric | Meaning |
 | --- | --- |
-| `reward` | Main scalar reward: submitted sequence matches any passing candidate |
-| `submitted_sequence_matches_passing_candidate` | Final answer matches one of the passing candidate sequences |
-| `submitted_sequence_matches_best_passing_candidate` | Final answer matches the best passing candidate exactly |
+| `reward` | Main scalar reward emphasizing dense candidate-selection quality |
+| `submitted_candidate_known_metric` | Final answer references a known candidate ID |
+| `submitted_candidate_passes_quality_gate` | Final answer selects a candidate that passes the quality gate |
+| `submitted_candidate_is_best_candidate` | Final answer selects the internally top-ranked candidate |
+| `submitted_candidate_rank_percentile_metric` | Percentile rank of the selected candidate among all candidates |
+| `submitted_candidate_quality_metric` | Monomer plausibility score of the selected candidate |
 | `pipeline_completed_metric` | All five stages ran in order |
 | `passing_candidate_available_metric` | At least one passing candidate existed |
 | `num_passing_candidates_metric` | Number of passing candidates from `summarize_candidates()` |
