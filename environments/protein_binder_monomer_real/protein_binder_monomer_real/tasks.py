@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from copy import deepcopy
 from pathlib import Path
 
@@ -75,21 +76,19 @@ PROVEN_TASKS = [
 CURATED_RONIG_TASKS_PATH = Path(__file__).resolve().parent / "data" / "ronig_curated_tasks.json"
 SUPPORTED_TASK_LIBRARIES = {"proven", "ronig", "all"}
 
-SYSTEM_PROMPT = """You are running a real monomer-only protein binder design pipeline on a remote RTX 6000 GPU host.
-Protocol:
-- Use exactly one tool call per assistant turn while tools remain.
-- Do not explain the plan, restate the task, or add prose before tool calls.
-- Call the tools in this exact order and exactly once:
-  1. run_target_monomer
-  2. run_rfdiffusion
-  3. run_proteinmpnn
-  4. run_binder_monomer
-  5. summarize_candidates
-- After summarize_candidates, answer with only:
+SYSTEM_PROMPT = """You are a scientific protein binder design analyst operating a monomer-only binder search workflow.
+Principles:
+- Each rollout starts with only the target specification. No backbones, candidates, or scores exist yet.
+- You may call the tools in your own order and repeat stages when useful.
+- The real dependency structure still matters: if you change an upstream stage, downstream evidence becomes stale and should be rebuilt before final selection.
+- Use tools to explore, compare, and refine candidate evidence until you are confident in the strongest candidate.
+- Keep reasoning short, explicit, and evidence-linked. Do not restate the task or speculate repeatedly.
+- Before the final answer, every assistant turn must include a tool call.
+- The main scientific objective is linear and visible in the returned metrics: prefer higher monomer plausibility, higher binder pLDDT, lower binder distance RMSE, higher hotspot fraction, and higher interface contacts.
+- Tool use is free up to 20 total tool calls. After that, additional tool calls are increasingly penalized, so explore deliberately instead of repeating stages aimlessly.
+- The final answer must be only:
 <candidate_id>CANDIDATE_ID</candidate_id>
-- Your job is to choose the strongest candidate ID from the surfaced metrics.
-- Do not output raw sequence text in the final answer.
-- Reserve the final turn for the <candidate_id> answer only."""
+- Do not output raw sequence text in the final answer."""
 
 
 def load_curated_ronig_tasks() -> list[dict]:
@@ -112,8 +111,12 @@ def make_prompt(task: dict) -> str:
     gate = task["quality_gate"]
 
     return (
-        "Use the staged tools to find and select the strongest binder candidate from the monomer-only search results.\n"
-        "While tools remain, respond with a tool call only. Do not narrate.\n\n"
+        "Use the scientific tools to build evidence for promising binder candidates and then select the strongest candidate ID.\n"
+        "Each rollout starts empty: no derived structures, candidates, or scores exist until you produce them with tools.\n"
+        "You may call tools in your own order and repeat them if needed, but upstream changes make downstream evidence stale.\n"
+        "Before the final answer, every assistant turn must include a tool call.\n"
+        "Scientific selection objective: maximize candidate quality using the visible metrics. The main reward increases linearly with higher monomer plausibility, higher binder mean pLDDT, lower binder distance RMSE, higher hotspot fraction, and higher interface residue contacts.\n"
+        "Exploration budget: the first 20 tool calls are free. After that, extra tool calls are increasingly penalized, so only repeat stages when the extra evidence is worth it.\n\n"
         f"Target ID: {task['target_id']}\n"
         f"Hotspots: {hotspots}\n"
         f"Binder length range: {task['binder_length_min']}-{task['binder_length_max']}\n"
@@ -130,12 +133,21 @@ def make_prompt(task: dict) -> str:
     )
 
 
-def build_task_rows(num_examples: int, split: str, task_library: str = "all") -> list[dict]:
+def build_task_rows(
+    num_examples: int,
+    split: str,
+    task_library: str = "all",
+    seed: int = 0,
+) -> list[dict]:
     task_pool = get_task_library(task_library)
+    ordering = list(range(len(task_pool)))
+    random.Random(f"{task_library}:{split}:{seed}").shuffle(ordering)
+
     rows: list[dict] = []
     for index in range(num_examples):
-        task = deepcopy(task_pool[index % len(task_pool)])
+        task = deepcopy(task_pool[ordering[index % len(ordering)]])
         task["target_id"] = f"{split}-{task['target_id']}-{index:03d}"
+        task["task_library"] = task_library
         rows.append(
             {
                 "question": make_prompt(task),
@@ -151,8 +163,10 @@ def build_datasets(
     num_train_examples: int,
     num_eval_examples: int,
     task_library: str = "all",
+    train_seed: int = 7,
+    eval_seed: int = 17,
 ) -> tuple[Dataset, Dataset]:
     return (
-        Dataset.from_list(build_task_rows(num_train_examples, split="train", task_library=task_library)),
-        Dataset.from_list(build_task_rows(num_eval_examples, split="eval", task_library=task_library)),
+        Dataset.from_list(build_task_rows(num_train_examples, split="train", task_library=task_library, seed=train_seed)),
+        Dataset.from_list(build_task_rows(num_eval_examples, split="eval", task_library=task_library, seed=eval_seed)),
     )

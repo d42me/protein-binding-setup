@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
+import urllib.error
 import urllib.request
 from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
+from typing import Any
 
 from datasets import load_dataset
 
@@ -52,24 +56,43 @@ class FilterConfig:
     min_receptor_length: int = 50
     max_receptor_length: int = 400
     max_sequence_similarity: float = 0.8
-    max_receptor_hydrophobic_fraction: float = 0.45
-    max_receptor_hydrophobic_run: int = 11
-    max_peptide_hydrophobic_fraction: float = 0.65
-    max_peptide_hydrophobic_run: int = 10
-    min_interface_residues: int = 8
+    max_receptor_hydrophobic_fraction: float = 0.48
+    max_receptor_hydrophobic_run: int = 13
+    max_peptide_hydrophobic_fraction: float = 0.72
+    max_peptide_hydrophobic_run: int = 12
+    min_interface_residues: int = 5
     num_hotspots: int = 3
     hotspot_contact_cutoff: float = 6.0
-    max_tasks: int = 24
+    max_tasks: int = 100
+    max_tasks_per_receptor_sequence: int = 2
+    max_tasks_per_peptide_sequence: int = 2
     num_designs: int = 4
     num_seqs_per_backbone: int = 4
     candidate_batch_size: int = 8
+    selection_seed: int = 7
+    max_workers: int = 12
+    pdb_cache_dir: Path = Path(".cache/ronig_pdbs")
+
+
+@dataclass(frozen=True)
+class ProcessedCandidate:
+    task: dict[str, Any]
+    receptor_sequence: str
+    peptide_sequence: str
+
+
+@dataclass(frozen=True)
+class Rejection:
+    reason: str
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Curate ronig/protein_binding_sequences into bundled monomer env tasks.")
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--max-tasks", type=int, default=24)
+    parser.add_argument("--max-tasks", type=int, default=100)
     parser.add_argument("--preview-limit", type=int, default=5)
+    parser.add_argument("--selection-seed", type=int, default=7)
+    parser.add_argument("--max-workers", type=int, default=12)
     return parser.parse_args()
 
 
@@ -112,19 +135,31 @@ def first_pass_rows(config: FilterConfig) -> list[dict]:
             continue
         seen.add(key)
         filtered.append(row)
-    filtered.sort(key=lambda row: (row["protein_pdb_name"].lower(), row["protein_pdb_chain"], row["peptide_pdb_chain"]))
+    random.Random(config.selection_seed).shuffle(filtered)
     return filtered
 
 
-def fetch_pdb_text(pdb_id: str, cache: dict[str, str]) -> str:
-    if pdb_id not in cache:
-        url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
-        cache[pdb_id] = urllib.request.urlopen(url, timeout=20).read().decode("utf-8", errors="ignore")
-    return cache[pdb_id]
+def fetch_pdb_text(pdb_id: str, cache_dir: Path) -> str:
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / f"{pdb_id.lower()}.pdb"
+    if cache_path.exists():
+        return cache_path.read_text()
+
+    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
+    last_error: Exception | None = None
+    for _ in range(3):
+        try:
+            text = urllib.request.urlopen(url, timeout=20).read().decode("utf-8", errors="ignore")
+            cache_path.write_text(text)
+            return text
+        except (TimeoutError, urllib.error.URLError) as exc:
+            last_error = exc
+    assert last_error is not None
+    raise last_error
 
 
-def parse_structure(pdb_text: str) -> dict[str, list[dict]]:
-    chains: dict[str, OrderedDict[tuple[str, str], dict]] = {}
+def parse_structure(pdb_text: str) -> dict[str, list[dict[str, Any]]]:
+    chains: dict[str, OrderedDict[tuple[str, str], dict[str, Any]]] = {}
     for line in pdb_text.splitlines():
         if not line.startswith("ATOM  ") or len(line) < 54:
             continue
@@ -161,7 +196,7 @@ def parse_structure(pdb_text: str) -> dict[str, list[dict]]:
     return {chain_id: list(residues.values()) for chain_id, residues in chains.items()}
 
 
-def chain_sequence(residues: list[dict]) -> str:
+def chain_sequence(residues: list[dict[str, Any]]) -> str:
     return "".join(residue["code"] for residue in residues)
 
 
@@ -183,7 +218,7 @@ def longest_hydrophobic_run(sequence: str) -> int:
     return best
 
 
-def compute_interface_contacts(receptor_residues: list[dict], peptide_residues: list[dict], cutoff: float) -> list[tuple[int, int]]:
+def compute_interface_contacts(receptor_residues: list[dict[str, Any]], peptide_residues: list[dict[str, Any]], cutoff: float) -> list[tuple[int, int]]:
     cutoff_squared = cutoff * cutoff
     contacts: list[tuple[int, int]] = []
     for residue_index, receptor_residue in enumerate(receptor_residues, start=1):
@@ -214,7 +249,14 @@ def binder_length_window(peptide_length: int) -> tuple[int, int]:
     return minimum, max(minimum, maximum)
 
 
-def build_task(row: dict, receptor_sequence: str, peptide_sequence: str, hotspot_indices: list[int], interface_contacts: list[tuple[int, int]], config: FilterConfig) -> dict:
+def build_task(
+    row: dict,
+    receptor_sequence: str,
+    peptide_sequence: str,
+    hotspot_indices: list[int],
+    interface_contacts: list[tuple[int, int]],
+    config: FilterConfig,
+) -> dict[str, Any]:
     binder_length_min, binder_length_max = binder_length_window(len(peptide_sequence))
     source_pdb = row["protein_pdb_name"].lower()
     source_receptor_chain = row["protein_pdb_chain"]
@@ -237,83 +279,114 @@ def build_task(row: dict, receptor_sequence: str, peptide_sequence: str, hotspot
         "source_peptide_chain": source_peptide_chain,
         "source_peptide_sequence": peptide_sequence,
         "source_peptide_length": len(peptide_sequence),
+        "source_train_part": row.get("train_part"),
         "interface_residue_count": len(interface_contacts),
         "top_interface_contact_count": interface_contacts[0][1],
     }
 
 
-def curate_tasks(config: FilterConfig) -> tuple[list[dict], dict[str, int]]:
+def process_row(row: dict, config: FilterConfig) -> ProcessedCandidate | Rejection:
+    pdb_id = row["protein_pdb_name"].lower()
+    try:
+        structure = parse_structure(fetch_pdb_text(pdb_id, config.pdb_cache_dir))
+    except Exception:
+        return Rejection("pdb_fetch_failed")
+
+    receptor_residues = structure.get(row["protein_pdb_chain"])
+    peptide_residues = structure.get(row["peptide_pdb_chain"])
+    if not receptor_residues or not peptide_residues:
+        return Rejection("missing_chain")
+
+    receptor_sequence = chain_sequence(receptor_residues)
+    peptide_sequence = chain_sequence(peptide_residues)
+    if receptor_sequence != row["receptor"] or peptide_sequence != row["peptide"]:
+        return Rejection("sequence_mismatch")
+
+    receptor_fraction = hydrophobic_fraction(receptor_sequence)
+    peptide_fraction = hydrophobic_fraction(peptide_sequence)
+    if (
+        receptor_fraction > config.max_receptor_hydrophobic_fraction
+        or longest_hydrophobic_run(receptor_sequence) > config.max_receptor_hydrophobic_run
+        or peptide_fraction > config.max_peptide_hydrophobic_fraction
+        or longest_hydrophobic_run(peptide_sequence) > config.max_peptide_hydrophobic_run
+    ):
+        return Rejection("hydrophobic_filter")
+
+    interface_contacts = compute_interface_contacts(receptor_residues, peptide_residues, config.hotspot_contact_cutoff)
+    if len(interface_contacts) < config.min_interface_residues:
+        return Rejection("too_few_interface_residues")
+
+    hotspot_indices = [index for index, _ in interface_contacts[: config.num_hotspots]]
+    if len(hotspot_indices) < config.num_hotspots:
+        return Rejection("too_few_hotspots")
+
+    return ProcessedCandidate(
+        task=build_task(row, receptor_sequence, peptide_sequence, hotspot_indices, interface_contacts, config),
+        receptor_sequence=receptor_sequence,
+        peptide_sequence=peptide_sequence,
+    )
+
+
+def curate_tasks(config: FilterConfig) -> tuple[list[dict[str, Any]], dict[str, int]]:
     candidates = first_pass_rows(config)
-    rejected_counts: dict[str, int] = {
+    summary: dict[str, int] = {
         "first_pass_candidates": len(candidates),
+        "pdb_fetch_failed": 0,
         "missing_chain": 0,
         "sequence_mismatch": 0,
         "hydrophobic_filter": 0,
         "too_few_interface_residues": 0,
         "too_few_hotspots": 0,
-        "duplicate_receptor_sequence": 0,
-        "duplicate_peptide_sequence": 0,
+        "duplicate_receptor_sequence_cap": 0,
+        "duplicate_peptide_sequence_cap": 0,
     }
-    selected: list[dict] = []
-    seen_receptor_sequences: set[str] = set()
-    seen_peptide_sequences: set[str] = set()
-    pdb_cache: dict[str, str] = {}
 
-    for row in candidates:
+    selected: list[dict[str, Any]] = []
+    receptor_counts: dict[str, int] = {}
+    peptide_counts: dict[str, int] = {}
+    batch_size = max(config.max_workers * 4, 32)
+
+    for batch_start in range(0, len(candidates), batch_size):
         if len(selected) >= config.max_tasks:
             break
-        pdb_id = row["protein_pdb_name"].lower()
-        structure = parse_structure(fetch_pdb_text(pdb_id, pdb_cache))
-        receptor_residues = structure.get(row["protein_pdb_chain"])
-        peptide_residues = structure.get(row["peptide_pdb_chain"])
-        if not receptor_residues or not peptide_residues:
-            rejected_counts["missing_chain"] += 1
-            continue
+        batch = candidates[batch_start : batch_start + batch_size]
+        with ThreadPoolExecutor(max_workers=config.max_workers) as executor:
+            processed_batch = list(executor.map(lambda row: process_row(row, config), batch))
 
-        receptor_sequence = chain_sequence(receptor_residues)
-        peptide_sequence = chain_sequence(peptide_residues)
-        if receptor_sequence != row["receptor"] or peptide_sequence != row["peptide"]:
-            rejected_counts["sequence_mismatch"] += 1
-            continue
+        for processed in processed_batch:
+            if len(selected) >= config.max_tasks:
+                break
+            if isinstance(processed, Rejection):
+                summary[processed.reason] = summary.get(processed.reason, 0) + 1
+                continue
 
-        receptor_fraction = hydrophobic_fraction(receptor_sequence)
-        peptide_fraction = hydrophobic_fraction(peptide_sequence)
-        if (
-            receptor_fraction > config.max_receptor_hydrophobic_fraction
-            or longest_hydrophobic_run(receptor_sequence) > config.max_receptor_hydrophobic_run
-            or peptide_fraction > config.max_peptide_hydrophobic_fraction
-            or longest_hydrophobic_run(peptide_sequence) > config.max_peptide_hydrophobic_run
-        ):
-            rejected_counts["hydrophobic_filter"] += 1
-            continue
+            receptor_count = receptor_counts.get(processed.receptor_sequence, 0)
+            if receptor_count >= config.max_tasks_per_receptor_sequence:
+                summary["duplicate_receptor_sequence_cap"] += 1
+                continue
 
-        interface_contacts = compute_interface_contacts(receptor_residues, peptide_residues, config.hotspot_contact_cutoff)
-        if len(interface_contacts) < config.min_interface_residues:
-            rejected_counts["too_few_interface_residues"] += 1
-            continue
-        hotspot_indices = [index for index, _ in interface_contacts[: config.num_hotspots]]
-        if len(hotspot_indices) < config.num_hotspots:
-            rejected_counts["too_few_hotspots"] += 1
-            continue
+            peptide_count = peptide_counts.get(processed.peptide_sequence, 0)
+            if peptide_count >= config.max_tasks_per_peptide_sequence:
+                summary["duplicate_peptide_sequence_cap"] += 1
+                continue
 
-        if receptor_sequence in seen_receptor_sequences:
-            rejected_counts["duplicate_receptor_sequence"] += 1
-            continue
-        if peptide_sequence in seen_peptide_sequences:
-            rejected_counts["duplicate_peptide_sequence"] += 1
-            continue
+            selected.append(processed.task)
+            receptor_counts[processed.receptor_sequence] = receptor_count + 1
+            peptide_counts[processed.peptide_sequence] = peptide_count + 1
 
-        selected.append(build_task(row, receptor_sequence, peptide_sequence, hotspot_indices, interface_contacts, config))
-        seen_receptor_sequences.add(receptor_sequence)
-        seen_peptide_sequences.add(peptide_sequence)
-
-    rejected_counts["selected"] = len(selected)
-    return selected, rejected_counts
+    summary["selected"] = len(selected)
+    summary["unique_receptor_sequences"] = len(receptor_counts)
+    summary["unique_peptide_sequences"] = len(peptide_counts)
+    return selected, summary
 
 
 def main() -> None:
     args = parse_args()
-    config = FilterConfig(max_tasks=args.max_tasks)
+    config = FilterConfig(
+        max_tasks=args.max_tasks,
+        selection_seed=args.selection_seed,
+        max_workers=args.max_workers,
+    )
     tasks, summary = curate_tasks(config)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(tasks, indent=2) + "\n", encoding="utf-8")

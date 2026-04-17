@@ -840,7 +840,15 @@ def run_binder_monomer_stage(config: RunConfig, paths: RunPaths) -> list[dict[st
         results.sort(key=lambda item: item["batch_index"])
 
     write_state(paths, "binder_batches", results)
-    return results
+    target_summary = read_state(paths, "target_summary")
+    ranked_candidates = rank_candidates(
+        candidates=candidates,
+        binder_output_root=paths.binder_monomer,
+        target_mean_plddt=parse_float(target_summary.get("target_mean_plddt")),
+        gate=config.quality_gate,
+    )
+    write_state(paths, "binder_candidate_results", [asdict(candidate) for candidate in ranked_candidates])
+    return [asdict(candidate) for candidate in ranked_candidates]
 
 
 def find_candidate_artifacts(candidate_id: str, binder_root: Path) -> tuple[Path, Path, dict[str, Any]]:

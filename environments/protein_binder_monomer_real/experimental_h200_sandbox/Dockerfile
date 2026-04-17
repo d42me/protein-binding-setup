@@ -40,6 +40,7 @@ RUN python3 -m venv ${PROTEIN_RUNTIME}/rfdiffusion-h200-venv \
       hydra-core==1.3.2 \
       omegaconf==2.3.0 \
       e3nn==0.3.3 \
+      pyrsistent==0.20.0 \
       pynvml==11.0.0 \
       psutil==7.2.2 \
       pydantic==2.12.5 \

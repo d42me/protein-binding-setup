@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import shlex
 import subprocess
 import sys
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,6 +19,7 @@ from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 APP = FastAPI(title="protein-binder-monomer-real-api")
+LOGGER = logging.getLogger("protein_binder_monomer_real.api")
 SUPPORT_DIR = Path(__file__).resolve().parent
 API_SERVER_PATH = Path(__file__).resolve()
 PIPELINE_SCRIPT = SUPPORT_DIR / "run_monomer_pipeline.py"
@@ -46,8 +49,8 @@ STAGE_RESULT_LOADERS: dict[str, str] = {
     "summarize": "summary/run_summary.json",
 }
 
-GPU_STAGES = {"target-monomer", "rfdiffusion", "binder-monomer"}
-CPU_STAGES = {"proteinmpnn", "summarize"}
+GPU_STAGES = {"target-monomer", "rfdiffusion", "proteinmpnn", "binder-monomer"}
+CPU_STAGES = {"summarize"}
 JOB_WRITE_LOCK = threading.Lock()
 
 
@@ -82,6 +85,24 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _payload_run_dir(payload: dict[str, Any]) -> str | None:
+    run_dir = payload.get("run_dir")
+    return str(run_dir) if run_dir is not None else None
+
+
+def _result_summary(result: Any) -> dict[str, Any]:
+    if isinstance(result, dict):
+        summary: dict[str, Any] = {"type": "dict", "keys": sorted(result.keys())[:24]}
+        if result.get("error"):
+            summary["error"] = result.get("error")
+        return summary
+    if isinstance(result, list):
+        return {"type": "list", "length": len(result)}
+    if result is None:
+        return {"type": "none"}
+    return {"type": type(result).__name__}
+
+
 def require_auth(authorization: str | None) -> None:
     if not API_TOKEN:
         raise HTTPException(status_code=500, detail="PROTEIN_BINDER_API_TOKEN is not configured on server")
@@ -107,6 +128,24 @@ def maybe_wrap_stage_command(command: str, *, wait_seconds: int = 7200) -> str:
         f"flock -w {wait_seconds} {shlex.quote(str(HOST_LOCK_PATH))} "
         f"bash -lc {shlex.quote(command)}"
     )
+
+
+def stage_command(subcommand: str, run_dir: Path, log_path: Path) -> str:
+    command = " ".join(
+        [
+            "python3",
+            shlex.quote(str(PIPELINE_SCRIPT)),
+            subcommand,
+            "--run-dir",
+            shlex.quote(str(run_dir)),
+            ">",
+            shlex.quote(str(log_path)),
+            "2>&1",
+        ]
+    )
+    if subcommand == "proteinmpnn":
+        return f"unset CUDA_VISIBLE_DEVICES && {command}"
+    return command
 
 
 def run_shell(command: str) -> tuple[int, str, str]:
@@ -301,20 +340,7 @@ def run_init(payload: InitRunRequest) -> dict[str, Any]:
 def run_stage(subcommand: str, payload: RunDirRequest) -> Any:
     run_dir = resolve_run_dir(payload.run_dir)
     log_path = run_dir / "state" / f"{subcommand}.log"
-    command = maybe_wrap_stage_command(
-        " ".join(
-            [
-                "python3",
-                shlex.quote(str(PIPELINE_SCRIPT)),
-                subcommand,
-                "--run-dir",
-                shlex.quote(str(run_dir)),
-                ">",
-                shlex.quote(str(log_path)),
-                "2>&1",
-            ]
-        )
-    )
+    command = maybe_wrap_stage_command(stage_command(subcommand, run_dir, log_path))
     returncode, stdout, stderr = run_shell(command)
     if returncode != 0:
         return {
@@ -353,6 +379,20 @@ def execute_job(job_id: str) -> None:
     kind = record["kind"]
     stage = record.get("stage")
     payload = record["payload"]
+    started = time.monotonic()
+    LOGGER.info(
+        "Starting protein binder API job: %s",
+        json.dumps(
+            {
+                "job_id": job_id,
+                "kind": kind,
+                "stage": stage,
+                "run_dir": _payload_run_dir(payload),
+                "slurm_job_id": record.get("slurm_job_id"),
+            },
+            sort_keys=True,
+        ),
+    )
     try:
         if kind == "init-run":
             result = run_init(InitRunRequest.model_validate(payload))
@@ -364,12 +404,43 @@ def execute_job(job_id: str) -> None:
             raise ValueError(f"Unknown job kind: {kind}")
         status = "failed" if isinstance(result, dict) and result.get("error") else "completed"
         update_job_record(job_id, status=status, result=result, completed_at=utc_now_iso())
+        log_fn = LOGGER.warning if status == "failed" else LOGGER.info
+        log_fn(
+            "Finished protein binder API job: %s",
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "kind": kind,
+                    "stage": stage,
+                    "run_dir": _payload_run_dir(payload),
+                    "slurm_job_id": record.get("slurm_job_id"),
+                    "status": status,
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                    "result_summary": _result_summary(result),
+                },
+                sort_keys=True,
+            ),
+        )
     except Exception as exc:
         update_job_record(
             job_id,
             status="failed",
             result={"error": "job_exception", "detail": str(exc)},
             completed_at=utc_now_iso(),
+        )
+        LOGGER.exception(
+            "Protein binder API job raised exception: %s",
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "kind": kind,
+                    "stage": stage,
+                    "run_dir": _payload_run_dir(payload),
+                    "slurm_job_id": record.get("slurm_job_id"),
+                    "elapsed_seconds": round(time.monotonic() - started, 3),
+                },
+                sort_keys=True,
+            ),
         )
         raise
 
@@ -381,13 +452,14 @@ def create_job(kind: Literal["init-run", "stage", "delete-run"], payload: BaseMo
     job_id = uuid.uuid4().hex
     job_root = job_dir(job_id)
     job_root.mkdir(parents=True, exist_ok=True)
+    payload_dict = payload.model_dump(mode="json")
     record = {
         "job_id": job_id,
         "kind": kind,
         "stage": stage,
         "status": "queued",
         "executor": EXECUTOR,
-        "payload": payload.model_dump(mode="json"),
+        "payload": payload_dict,
         "result": None,
         "slurm_job_id": None,
         "created_at": utc_now_iso(),
@@ -397,6 +469,19 @@ def create_job(kind: Literal["init-run", "stage", "delete-run"], payload: BaseMo
         "stderr_log": str(job_root / "slurm-%j.err"),
     }
     save_job_record(record)
+    LOGGER.info(
+        "Queued protein binder API job: %s",
+        json.dumps(
+            {
+                "job_id": job_id,
+                "kind": kind,
+                "stage": stage,
+                "executor": EXECUTOR,
+                "run_dir": _payload_run_dir(payload_dict),
+            },
+            sort_keys=True,
+        ),
+    )
 
     if EXECUTOR == "local":
         thread = threading.Thread(target=execute_job, args=(job_id,), daemon=True)
@@ -412,9 +497,35 @@ def create_job(kind: Literal["init-run", "stage", "delete-run"], payload: BaseMo
             result={"error": "slurm_submit_failed", "detail": str(exc)},
             completed_at=utc_now_iso(),
         )
+        LOGGER.warning(
+            "Protein binder API job failed during SLURM submission: %s",
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "kind": kind,
+                    "stage": stage,
+                    "run_dir": _payload_run_dir(payload_dict),
+                    "detail": str(exc),
+                },
+                sort_keys=True,
+            ),
+        )
         return job_id
 
     update_job_record(job_id, slurm_job_id=slurm_job_id)
+    LOGGER.info(
+        "Submitted protein binder API job to SLURM: %s",
+        json.dumps(
+            {
+                "job_id": job_id,
+                "kind": kind,
+                "stage": stage,
+                "run_dir": _payload_run_dir(payload_dict),
+                "slurm_job_id": slurm_job_id,
+            },
+            sort_keys=True,
+        ),
+    )
     return job_id
 
 

@@ -1,8 +1,8 @@
 [project]
 name = "protein-binder-monomer-real"
-description = "Remote RTX6000-backed monomer-only protein binder environment with real ColabFold, RFdiffusion, and ProteinMPNN tools"
+description = "SLURM-backed monomer-only protein binder environment with real ColabFold, RFdiffusion, and ProteinMPNN tools"
 tags = ["protein-design", "biology", "tool-use", "monomer", "remote-gpu", "train", "eval"]
-version = "0.2.0"
+version = "0.4.0"
 requires-python = ">=3.10"
 dependencies = [
     "datasets>=3.0.0",
