@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import json
 import math
 import os
 import shlex
 import shutil
+import struct
 import subprocess
 import sys
+import zlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -47,6 +50,7 @@ COMMANDS = {
     "proteinmpnn",
     "binder-monomer",
     "summarize",
+    "render-structure",
 }
 
 
@@ -952,6 +956,192 @@ def summarize_stage(config: RunConfig, paths: RunPaths) -> dict[str, Any]:
     return payload
 
 
+PNG_COLORS = [
+    (37, 99, 235),
+    (234, 88, 12),
+    (22, 163, 74),
+    (168, 85, 247),
+    (220, 38, 38),
+]
+
+
+def encode_png_rgb(width: int, height: int, pixels: bytearray) -> bytes:
+    raw = bytearray()
+    row_bytes = width * 3
+    for y in range(height):
+        raw.append(0)
+        start = y * row_bytes
+        raw.extend(pixels[start : start + row_bytes])
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    header = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) + chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + chunk(b"IEND", b"")
+
+
+def set_pixel(pixels: bytearray, width: int, height: int, x: int, y: int, color: tuple[int, int, int]) -> None:
+    if x < 0 or y < 0 or x >= width or y >= height:
+        return
+    offset = (y * width + x) * 3
+    pixels[offset : offset + 3] = bytes(color)
+
+
+def draw_disc(pixels: bytearray, width: int, height: int, x: int, y: int, radius: int, color: tuple[int, int, int]) -> None:
+    radius_sq = radius * radius
+    for yy in range(y - radius, y + radius + 1):
+        for xx in range(x - radius, x + radius + 1):
+            if (xx - x) ** 2 + (yy - y) ** 2 <= radius_sq:
+                set_pixel(pixels, width, height, xx, yy, color)
+
+
+def draw_line(pixels: bytearray, width: int, height: int, start: tuple[int, int], end: tuple[int, int], color: tuple[int, int, int]) -> None:
+    x0, y0 = start
+    x1, y1 = end
+    dx = abs(x1 - x0)
+    dy = -abs(y1 - y0)
+    sx = 1 if x0 < x1 else -1
+    sy = 1 if y0 < y1 else -1
+    error = dx + dy
+    while True:
+        draw_disc(pixels, width, height, x0, y0, 2, color)
+        if x0 == x1 and y0 == y1:
+            break
+        doubled = 2 * error
+        if doubled >= dy:
+            error += dy
+            x0 += sx
+        if doubled <= dx:
+            error += dx
+            y0 += sy
+
+
+def load_ca_trace(pdb_path: Path) -> dict[str, list[tuple[float, float, float]]]:
+    traces: dict[str, list[tuple[float, float, float]]] = {}
+    for line in pdb_path.read_text().splitlines():
+        if not line.startswith("ATOM") or line[12:16].strip() != "CA":
+            continue
+        chain = line[21].strip() or "_"
+        traces.setdefault(chain, []).append((float(line[30:38]), float(line[38:46]), float(line[46:54])))
+    if not traces:
+        raise ValueError(f"No CA trace could be rendered from {pdb_path}")
+    return traces
+
+
+def project_trace_points(traces: dict[str, list[tuple[float, float, float]]], width: int, height: int) -> dict[str, list[tuple[int, int]]]:
+    projected: dict[str, list[tuple[float, float]]] = {}
+    all_points: list[tuple[float, float]] = []
+    for chain, points in traces.items():
+        chain_points = []
+        for x, y, z in points:
+            px = (x - y) * 0.866
+            py = (x + y) * 0.35 - z * 0.75
+            chain_points.append((px, py))
+            all_points.append((px, py))
+        projected[chain] = chain_points
+
+    min_x = min(x for x, _ in all_points)
+    max_x = max(x for x, _ in all_points)
+    min_y = min(y for _, y in all_points)
+    max_y = max(y for _, y in all_points)
+    padding = 28
+    scale_x = (width - 2 * padding) / max(1e-6, max_x - min_x)
+    scale_y = (height - 2 * padding) / max(1e-6, max_y - min_y)
+    scale = min(scale_x, scale_y)
+
+    screen: dict[str, list[tuple[int, int]]] = {}
+    for chain, points in projected.items():
+        screen[chain] = [
+            (
+                int((x - min_x) * scale + padding),
+                int(height - ((y - min_y) * scale + padding)),
+            )
+            for x, y in points
+        ]
+    return screen
+
+
+def render_pdb_projection_png(pdb_path: Path, *, width: int = 720, height: int = 480) -> bytes:
+    traces = load_ca_trace(pdb_path)
+    projected = project_trace_points(traces, width, height)
+    pixels = bytearray([248, 250, 252] * width * height)
+    for color_index, chain in enumerate(sorted(projected)):
+        color = PNG_COLORS[color_index % len(PNG_COLORS)]
+        points = projected[chain]
+        for start, end in zip(points, points[1:]):
+            draw_line(pixels, width, height, start, end, color)
+        for point in points[:: max(1, len(points) // 24)]:
+            draw_disc(pixels, width, height, point[0], point[1], 3, color)
+    return encode_png_rgb(width, height, pixels)
+
+
+def _select_candidate_for_render(summary: dict[str, Any], candidate_id: str | None) -> dict[str, Any]:
+    if candidate_id:
+        for candidate in summary.get("ranked_candidates", []):
+            if candidate.get("candidate_id") == candidate_id:
+                return candidate
+        raise ValueError(f"Unknown candidate_id={candidate_id!r}")
+    candidate = summary.get("best_candidate")
+    if not candidate:
+        raise ValueError("No best candidate is available; run summarize first.")
+    return candidate
+
+
+def resolve_structure_render_path(run_dir: Path, structure: str, candidate_id: str | None = None) -> tuple[Path, dict[str, Any]]:
+    if structure == "target":
+        target_summary = read_json(run_dir / "state" / "target_summary.json")
+        return Path(target_summary["target_pdb"]), {
+            "caption": "Predicted target monomer CA trace",
+            "target_mean_plddt": target_summary.get("target_mean_plddt"),
+            "target_ptm": target_summary.get("target_ptm"),
+        }
+
+    summary = read_json(run_dir / "summary" / "run_summary.json")
+    candidate = _select_candidate_for_render(summary, candidate_id)
+    if structure in {"best_binder_monomer", "binder_monomer"}:
+        binder_pdb = candidate.get("binder_pdb")
+        if not binder_pdb:
+            raise ValueError("Selected candidate has no binder monomer PDB; run binder-monomer and summarize first.")
+        return Path(binder_pdb), {
+            "caption": "Selected binder monomer CA trace",
+            "candidate": {key: candidate.get(key) for key in ["candidate_id", "binder_mean_plddt", "binder_distance_rmse", "monomer_plausibility_score", "passes_quality_gate"]},
+        }
+
+    backbones = {backbone.get("backbone_name"): backbone for backbone in summary.get("backbones", [])}
+    backbone = backbones.get(candidate.get("backbone_name"))
+    if not backbone or not backbone.get("backbone_pdb"):
+        raise ValueError("Selected candidate has no RFdiffusion backbone PDB; run rfdiffusion and summarize first.")
+    return Path(backbone["backbone_pdb"]), {
+        "caption": "RFdiffusion target-plus-binder complex CA trace; chain colors distinguish target and binder",
+        "candidate": {key: candidate.get(key) for key in ["candidate_id", "backbone_name", "binder_length", "hotspot_fraction", "interface_residue_contacts", "passes_quality_gate"]},
+    }
+
+
+def render_structure_payload(
+    run_dir: Path,
+    *,
+    structure: str = "best_candidate",
+    candidate_id: str | None = None,
+    width: int = 720,
+    height: int = 480,
+) -> dict[str, Any]:
+    run_dir = run_dir.expanduser().resolve()
+    pdb_path, metadata = resolve_structure_render_path(run_dir, structure, candidate_id)
+    image_png = render_pdb_projection_png(pdb_path, width=width, height=height)
+    image_b64 = base64.b64encode(image_png).decode()
+    return {
+        "ok": True,
+        "structure": structure,
+        "candidate_id": candidate_id,
+        "source_pdb": str(pdb_path),
+        "width": width,
+        "height": height,
+        **metadata,
+        "image_url": f"data:image/png;base64,{image_b64}",
+        "image_png_base64": image_b64,
+    }
+
+
 def build_config_from_args(args: argparse.Namespace) -> RunConfig:
     helper_script = Path(__file__).with_name("run_rfdiffusion_blackwell.py")
     hotspots = [token.strip() for token in args.hotspots.split(",") if token.strip()]
@@ -1044,6 +1234,17 @@ def build_parser() -> argparse.ArgumentParser:
         stage_parser = subparsers.add_parser(name, help=help_text)
         stage_parser.add_argument("--run-dir", type=Path, required=True)
 
+    render_parser = subparsers.add_parser("render-structure", help="Render a target or designed complex PDB as a rollout-viewer PNG.")
+    render_parser.add_argument("--run-dir", type=Path, required=True)
+    render_parser.add_argument(
+        "--structure",
+        default="best_candidate",
+        choices=["target", "best_candidate", "candidate", "best_binder_monomer", "binder_monomer"],
+    )
+    render_parser.add_argument("--candidate-id", help="Candidate ID to render when --structure=candidate or binder_monomer.")
+    render_parser.add_argument("--width", type=int, default=720)
+    render_parser.add_argument("--height", type=int, default=480)
+
     return parser
 
 
@@ -1094,7 +1295,17 @@ def main() -> None:
     config = load_run_config(run_dir)
     paths = RunPaths.from_root(run_dir)
 
-    if args.command == "target-monomer":
+    if args.command == "render-structure":
+        print_json(
+            render_structure_payload(
+                run_dir,
+                structure=args.structure,
+                candidate_id=args.candidate_id,
+                width=args.width,
+                height=args.height,
+            )
+        )
+    elif args.command == "target-monomer":
         print_json(run_target_monomer_stage(config, paths))
     elif args.command == "rfdiffusion":
         print_json([asdict(backbone) for backbone in run_rfdiffusion_stage(config, paths)])

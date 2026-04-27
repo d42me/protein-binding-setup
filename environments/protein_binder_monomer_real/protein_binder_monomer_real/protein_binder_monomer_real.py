@@ -573,6 +573,13 @@ def _budgeted_stage_output(stage_name: str, payload: Any) -> Any:
                 "top_candidates_by_mpnn_score": top_candidates[:16],
             }
         if stage_name == "binder_monomer":
+            if payload and all(isinstance(item, dict) and "batch_index" in item for item in payload):
+                return {
+                    "num_scoring_batches": len(payload),
+                    "candidate_scores_ready": True,
+                    "next_stage": "summarize_candidates",
+                    "note": "Binder monomer scoring finished. The remote API returned batch metadata; call summarize_candidates to load ranked candidate scores and choose a final candidate_id.",
+                }
             candidate_views = [_budgeted_candidate_view(candidate) for candidate in payload]
             top_candidates = sorted(
                 candidate_views,
@@ -644,6 +651,9 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         remote_api_base_url: str | None = None,
         remote_api_token_env_var: str = "PROTEIN_BINDER_API_TOKEN",
         remote_api_timeout_seconds: int = 43200,
+        enable_structure_rendering: bool = False,
+        structure_render_width: int = 720,
+        structure_render_height: int = 480,
         **kwargs,
     ):
         super().__init__(tools=[], **kwargs)
@@ -656,6 +666,9 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         self.remote_api_base_url = (remote_api_base_url or "").rstrip("/") or None
         self.remote_api_token_env_var = remote_api_token_env_var
         self.remote_api_timeout_seconds = remote_api_timeout_seconds
+        self.enable_structure_rendering = enable_structure_rendering
+        self.structure_render_width = structure_render_width
+        self.structure_render_height = structure_render_height
         self._support_sync_lock = asyncio.Lock()
         self._support_synced = False
         self._remote_command_lock = asyncio.Lock()
@@ -670,6 +683,8 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         self.add_tool(self.run_proteinmpnn, args_to_skip=["state"])
         self.add_tool(self.run_binder_monomer, args_to_skip=["state"])
         self.add_tool(self.summarize_candidates, args_to_skip=["state"])
+        if self.enable_structure_rendering:
+            self.add_tool(self.render_structure_snapshot, args_to_skip=["state"])
 
     def _api_enabled(self) -> bool:
         return self.remote_api_base_url is not None
@@ -1390,6 +1405,65 @@ class ProteinBinderMonomerRealEnv(vf.StatefulToolEnv):
         )
         return payload
 
+    async def _render_structure_payload(self, state: vf.State, structure: str, candidate_id: str | None) -> dict[str, Any]:
+        payload = {
+            "run_dir": state["remote_run_dir"],
+            "structure": structure,
+            "candidate_id": candidate_id or None,
+            "width": self.structure_render_width,
+            "height": self.structure_render_height,
+        }
+        if self._api_enabled():
+            return await self._remote_api_request_with_retry("POST", "/v1/render/structure", payload)
+
+        command = " ".join(
+            [
+                "python3",
+                shlex.quote(f"{self.remote_support_dir}/run_monomer_pipeline.py"),
+                "render-structure",
+                "--run-dir",
+                shlex.quote(str(payload["run_dir"])),
+                "--structure",
+                shlex.quote(structure),
+                "--width",
+                str(self.structure_render_width),
+                "--height",
+                str(self.structure_render_height),
+                *( ["--candidate-id", shlex.quote(candidate_id)] if candidate_id else [] ),
+            ]
+        )
+        return json.loads(await self._run_remote_command(command))
+
+    async def render_structure_snapshot(
+        self,
+        state: vf.State,
+        structure: str = "best_candidate",
+        candidate_id: str = "",
+    ) -> list[dict]:
+        """Render a target or designed protein structure snapshot for multimodal rollout inspection.
+
+        Use structure="target" after run_target_monomer, structure="best_candidate" after summarize_candidates,
+        or structure="candidate"/"binder_monomer" with candidate_id after summarize_candidates.
+        Returns a concise JSON caption plus a PNG image for the rollout viewer.
+        """
+        try:
+            payload = await self._render_structure_payload(state, structure, candidate_id or None)
+        except Exception as exc:
+            payload = {"ok": False, "error": "render_structure_failed", "detail": str(exc)}
+
+        text_payload = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"image_url", "image_png_base64"}
+        }
+        content: list[dict[str, Any]] = [
+            {"type": "text", "text": json.dumps(text_payload, indent=2, sort_keys=True)}
+        ]
+        image_url = payload.get("image_url")
+        if payload.get("ok") and isinstance(image_url, str):
+            content.append({"type": "image_url", "image_url": {"url": image_url}})
+        return content
+
     async def run_target_monomer(self, state: vf.State) -> str:
         """Run the target ColabFold monomer stage.
 
@@ -1526,6 +1600,9 @@ def load_environment(
     task_library: str = "ronig",
     train_seed: int = 7,
     eval_seed: int = 17,
+    enable_structure_rendering: bool = False,
+    structure_render_width: int = 720,
+    structure_render_height: int = 480,
 ) -> vf.Environment:
     support_dir = Path(__file__).resolve().parent / "support"
     resolved_remote_api_base_url = remote_api_base_url or os.environ.get("PROTEIN_BINDER_REMOTE_API_BASE_URL")
@@ -1535,6 +1612,9 @@ def load_environment(
     resolved_train_seed = _env_int("PROTEIN_BINDER_TRAIN_SEED", train_seed)
     resolved_eval_seed = _env_int("PROTEIN_BINDER_EVAL_SEED", eval_seed)
     resolved_task_library = os.environ.get("PROTEIN_BINDER_TASK_LIBRARY", task_library)
+    resolved_enable_structure_rendering = _env_flag("PROTEIN_BINDER_ENABLE_STRUCTURE_RENDERING", enable_structure_rendering)
+    resolved_structure_render_width = _env_int("PROTEIN_BINDER_STRUCTURE_RENDER_WIDTH", structure_render_width)
+    resolved_structure_render_height = _env_int("PROTEIN_BINDER_STRUCTURE_RENDER_HEIGHT", structure_render_height)
     resolved_keep_remote_artifacts = _env_flag("PROTEIN_BINDER_KEEP_REMOTE_ARTIFACTS", keep_remote_artifacts)
     resolved_sync_support_on_start = _env_flag(
         "PROTEIN_BINDER_SYNC_SUPPORT_ON_START",
@@ -1603,6 +1683,8 @@ def load_environment(
                 },
                 "keep_remote_artifacts": resolved_keep_remote_artifacts,
                 "sync_support_on_start": resolved_sync_support_on_start,
+                "enable_structure_rendering": resolved_enable_structure_rendering,
+                "structure_render_size": [resolved_structure_render_width, resolved_structure_render_height],
                 "transport": "http" if resolved_remote_api_base_url else "ssh",
                 "remote_api_base_url": resolved_remote_api_base_url,
                 "remote_host": remote_host,
@@ -1614,6 +1696,12 @@ def load_environment(
             sort_keys=True,
         ),
     )
+
+    resolved_system_prompt = SYSTEM_PROMPT
+    if resolved_enable_structure_rendering:
+        resolved_system_prompt = (
+            f"{SYSTEM_PROMPT}\n- Optional multimodal inspection: after a structure-producing stage, call render_structure_snapshot to view a 3D CA-trace PNG in the rollout viewer when visual evidence would help compare target/binder geometry."
+        )
 
     parser = vf.XMLParser(["candidate_id"], answer_field="candidate_id")
     rubric = vf.Rubric(
@@ -1646,7 +1734,7 @@ def load_environment(
         eval_dataset=eval_dataset,
         rubric=rubric,
         parser=parser,
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=resolved_system_prompt,
         max_turns=resolved_max_turns,
         remote_host=remote_host,
         remote_support_dir=remote_support_dir,
@@ -1657,4 +1745,7 @@ def load_environment(
         remote_api_base_url=resolved_remote_api_base_url,
         remote_api_token_env_var=remote_api_token_env_var,
         remote_api_timeout_seconds=remote_api_timeout_seconds,
+        enable_structure_rendering=resolved_enable_structure_rendering,
+        structure_render_width=resolved_structure_render_width,
+        structure_render_height=resolved_structure_render_height,
     )

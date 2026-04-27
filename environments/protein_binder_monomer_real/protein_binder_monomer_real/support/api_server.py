@@ -18,6 +18,8 @@ from typing import Any, Literal
 from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
+from run_monomer_pipeline import render_structure_payload
+
 APP = FastAPI(title="protein-binder-monomer-real-api")
 LOGGER = logging.getLogger("protein_binder_monomer_real.api")
 SUPPORT_DIR = Path(__file__).resolve().parent
@@ -45,7 +47,7 @@ STAGE_RESULT_LOADERS: dict[str, str] = {
     "target-monomer": "state/target_summary.json",
     "rfdiffusion": "state/backbones.json",
     "proteinmpnn": "state/candidates.json",
-    "binder-monomer": "state/binder_batches.json",
+    "binder-monomer": "state/binder_candidate_results.json",
     "summarize": "summary/run_summary.json",
 }
 
@@ -79,6 +81,14 @@ class InitRunRequest(BaseModel):
 
 class RunDirRequest(BaseModel):
     run_dir: str
+
+
+class RenderStructureRequest(BaseModel):
+    run_dir: str
+    structure: Literal["target", "best_candidate", "candidate", "best_binder_monomer", "binder_monomer"] = "best_candidate"
+    candidate_id: str | None = None
+    width: int = 720
+    height: int = 480
 
 
 def utc_now_iso() -> str:
@@ -686,6 +696,22 @@ def get_job(job_id: str, authorization: str | None = Header(default=None)) -> di
     if job.get("slurm_job_id"):
         job["slurm_state"] = lookup_slurm_state(job["slurm_job_id"])
     return job
+
+
+@APP.post("/v1/render/structure")
+def render_structure(payload: RenderStructureRequest, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    require_auth(authorization)
+    run_dir = resolve_run_dir(payload.run_dir)
+    try:
+        return render_structure_payload(
+            run_dir,
+            structure=payload.structure,
+            candidate_id=payload.candidate_id,
+            width=payload.width,
+            height=payload.height,
+        )
+    except Exception as exc:
+        return {"ok": False, "error": "render_structure_failed", "detail": str(exc)}
 
 
 @APP.get("/v1/jobs/{job_id}/debug")

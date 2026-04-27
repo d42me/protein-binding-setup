@@ -7,6 +7,7 @@ SLURM-backed **monomer-only** protein binder environment.
 - **Type**: `StatefulToolEnv`
 - **Execution model**: tool calls run the real monomer harness on `ubuntu@154.54.100.216`
 - **Current default dataset**: ronig-backed 100-task monomer library with deterministic train/eval shuffles
+- **New PINDER mode**: `task_library="pinder"` uses curated receptor targets from `Synthyra/PINDER` with natural-partner length and global PPI statistics as design priors
 
 ## Why this environment exists
 This environment turns the real monomer harness into rollout tools without requiring AlphaFold-Multimer.
@@ -22,6 +23,8 @@ Each rollout gets a fresh remote run directory and five scientific tools:
 3. `run_proteinmpnn()`
 4. `run_binder_monomer()`
 5. `summarize_candidates()`
+
+When `enable_structure_rendering=true`, the environment also exposes `render_structure_snapshot()`, which returns a concise JSON caption plus a PNG image content part for the rollout viewer.
 
 The tools no longer emit `next_required_tool` hints. The model must keep track of the workflow itself.
 Each tool now returns its full structured `tool_input` and `tool_output`, so the model can reason from the actual scientific evidence instead of following hidden scaffolding hints.
@@ -41,7 +44,7 @@ The model has more freedom now:
 - after `30`, additional tool calls incur an increasing penalty
 
 ## Monomer-only quality gate
-The task currently uses the tuned insulin gate:
+Each task carries its own quality gate. The proven and ronig libraries use the stricter historical gate:
 - target mean pLDDT >= 80
 - binder mean pLDDT >= 80
 - binder distance RMSE <= 1.5
@@ -49,11 +52,16 @@ The task currently uses the tuned insulin gate:
 - interface residue contacts >= 10
 - monomer plausibility score >= 0.72
 
+PINDER tasks use a slightly broader exploration gate (`target pLDDT >= 70`, `binder pLDDT >= 78`, `RMSE <= 1.75`, contact threshold derived from the source PPI) because the HuggingFace table provides real receptor/ligand sequences and global interaction metadata, but not residue-level interface contacts.
+
 ## Current dataset
-The environment now supports three task libraries via `task_library`:
+The environment now supports these task libraries via `task_library`:
 - `proven` — the original 3 hand-validated RFdiffusion examples
 - `ronig` — a bundled curated subset of **100** structure-validated tasks derived from `ronig/protein_binding_sequences`
+- `pinder` — a bundled curated subset from `Synthyra/PINDER` with **96 train** and **32 eval** receptor-target tasks
+- `pinder_train` / `pinder_eval` — force one side of the bundled PINDER split
 - `all` — the mix of `proven + ronig`
+- `all_plus_pinder` — the mix of `proven + ronig + pinder split`
 
 ### Proven library
 These rows come from a curated **real target set** built from RFdiffusion example structures:
@@ -81,9 +89,24 @@ Current curation heuristics are intentionally conservative but broader than befo
 
 Each rollout now materializes the target from the bundled `target_sequence` directly, so hosted workers do not depend on a pre-existing remote PDB path for dataset tasks.
 
+### PINDER curated library
+The bundled PINDER subset is produced offline by:
+- `experiments/real_monomer_harness/curate_pinder_dataset.py`
+
+It starts from `Synthyra/PINDER`, whose train/valid/test splits are already deduplicated and trimmed by sequence/structure similarity. The local curation keeps compact, real PPI-derived receptor targets that are practical for the current RFdiffusion/ProteinMPNN/ColabFold loop:
+- receptor length `60-220`
+- natural partner length `35-80`
+- remove exact/high-identity homodimers
+- require valid amino-acid sequences, PINDER probability `>= 0.55`, at least `20` intermolecular contacts, and buried SASA `>= 600`
+- set binder length around the natural partner length
+- carry PINDER probability, buried SASA, contact counts, contact mix, and natural-partner composition into the prompt as priors
+- derive three deterministic receptor anchor hotspots from sequence thirds because the HuggingFace table has global PPI metadata but no residue-level contact map
+
+This mode is intentionally honest about the limitation: PINDER supplies real interaction targets and priors, while the rollout tools still have to test whether RFdiffusion/ProteinMPNN/ColabFold produce a plausible binder against those anchors.
+
 This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
-## Reward design (v0.4.1)
+## Reward design (v0.5.1)
 The reward is now deliberately harder: it gives the model more room to explore, but it no longer saturates just because a candidate clears the quality gate.
 
 ### Main scientific reward
@@ -171,7 +194,7 @@ The current checked-in defaults are approximately:
 - train rows: `96`
 - eval rows: `24`
 - max turns: `30`
-- reward design: strict nonlinear scientific candidate selection with post-30-call overuse penalty (`v0.4.1`)
+- reward design: strict nonlinear scientific candidate selection with post-30-call overuse penalty (`v0.5.1`)
 
 To run that behavior explicitly instead of relying on defaults:
 
@@ -191,13 +214,31 @@ prime eval run protein-binder-monomer-real \
   -a '{"task_library":"proven"}'
 ```
 
-To reproduce the broader curated dataset setting:
+To reproduce the broader curated ronig setting:
 
 ```bash
 prime eval run protein-binder-monomer-real \
   -m gpt-4.1-mini \
   -n 1 \
   -a '{"task_library":"ronig"}'
+```
+
+To run the new PINDER-derived target setting:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -a '{"task_library":"pinder","num_eval_examples":4}'
+```
+
+To render a multimodal structure snapshot in rollout outputs, enable the optional rendering tool and call `render_structure_snapshot()` after `run_target_monomer()` or `summarize_candidates()`:
+
+```bash
+prime eval run protein-binder-monomer-real \
+  -m gpt-4.1-mini \
+  -n 1 \
+  -a '{"task_library":"pinder","enable_structure_rendering":true,"keep_remote_artifacts":true}'
 ```
 
 ### 3. Reproduce hosted runs
@@ -268,7 +309,7 @@ That config currently pins:
 If you want exact reproducibility, record all of:
 - repo commit SHA
 - environment version in the config (`@...`)
-- task library (`proven`, `ronig`, or `all`)
+- task library (`proven`, `ronig`, `pinder`, `all`, or `all_plus_pinder`)
 - transport mode (SSH vs HTTP API)
 - remote host / remote API deployment version
 - whether `sync_support_on_start` was enabled
@@ -283,6 +324,16 @@ python experiments/real_monomer_harness/curate_ronig_dataset.py \
   --max-tasks 100 \
   --selection-seed 7 \
   --output ./environments/protein_binder_monomer_real/protein_binder_monomer_real/data/ronig_curated_tasks.json
+```
+
+To regenerate the PINDER task library:
+
+```bash
+python experiments/real_monomer_harness/curate_pinder_dataset.py \
+  --train-count 96 \
+  --eval-count 32 \
+  --seed 20260426 \
+  --output ./environments/protein_binder_monomer_real/protein_binder_monomer_real/data/pinder_curated_tasks.json
 ```
 
 To scout the upstream dataset before curation:
@@ -355,6 +406,9 @@ Optional env-var overrides for hosted runs:
 - `PROTEIN_BINDER_TASK_LIBRARY`
 - `PROTEIN_BINDER_KEEP_REMOTE_ARTIFACTS`
 - `PROTEIN_BINDER_SYNC_SUPPORT_ON_START`
+- `PROTEIN_BINDER_ENABLE_STRUCTURE_RENDERING`
+- `PROTEIN_BINDER_STRUCTURE_RENDER_WIDTH`
+- `PROTEIN_BINDER_STRUCTURE_RENDER_HEIGHT`
 
 Best practice:
 - prefer normal `load_environment(...)` args for local development and reproducibility
@@ -375,7 +429,7 @@ Useful SLURM server env vars:
 - `PROTEIN_BINDER_API_SLURM_QOS`
 - `PROTEIN_BINDER_API_SLURM_EXTRA_ARGS`
 
-Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stages/...`, `/v1/jobs/delete-run`, `/v1/jobs/{job_id}`), so the environment client does not need to change when the remote host switches from a single serialized worker to a SLURM-backed executor.
+Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stages/...`, `/v1/jobs/delete-run`, `/v1/jobs/{job_id}`). New API deployments also expose `/v1/render/structure` for the optional rollout-viewer PNG renderer, so the environment client does not need to change when the remote host switches from a single serialized worker to a SLURM-backed executor.
 
 ## Environment arguments
 | Arg | Type | Default | Description |
@@ -391,9 +445,12 @@ Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stage
 | `remote_api_base_url` | str \| null | `null` | Optional bearer-token FastAPI endpoint for the remote harness |
 | `remote_api_token_env_var` | str | `"PROTEIN_BINDER_API_TOKEN"` | Environment variable name containing the bearer token for HTTP mode |
 | `remote_api_timeout_seconds` | int | `43200` | Socket timeout for long-running HTTP stage requests |
-| `task_library` | str | `"ronig"` | Which bundled task pool to use: `proven`, `ronig`, or `all` |
+| `task_library` | str | `"ronig"` | Which bundled task pool to use: `proven`, `ronig`, `pinder`, `pinder_train`, `pinder_eval`, `all`, or `all_plus_pinder` |
 | `train_seed` | int | `7` | Deterministic shuffle seed for selecting train rows from the task library |
 | `eval_seed` | int | `17` | Deterministic shuffle seed for selecting eval rows from the task library |
+| `enable_structure_rendering` | bool | `false` | Add the optional `render_structure_snapshot` multimodal tool |
+| `structure_render_width` | int | `720` | Width of rendered rollout-viewer PNGs |
+| `structure_render_height` | int | `480` | Height of rendered rollout-viewer PNGs |
 
 ## Metrics
 | Metric | Meaning |
@@ -416,7 +473,7 @@ Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stage
 | `best_passing_score_metric` | Monomer plausibility score of the best passing candidate |
 | `target_mean_plddt_metric` | Target monomer quality |
 | `total_stage_calls_metric` | Total number of stage-tool calls in the rollout |
-| `tool_overuse_penalty_metric` | Current overuse penalty after the free 20-call budget |
+| `tool_overuse_penalty_metric` | Current overuse penalty after the free 30-call budget |
 | `stage_error_metric` | Count of failed or invalid stage executions |
 
 ## GPU sandbox images

@@ -74,7 +74,8 @@ PROVEN_TASKS = [
 ]
 
 CURATED_RONIG_TASKS_PATH = Path(__file__).resolve().parent / "data" / "ronig_curated_tasks.json"
-SUPPORTED_TASK_LIBRARIES = {"proven", "ronig", "all"}
+CURATED_PINDER_TASKS_PATH = Path(__file__).resolve().parent / "data" / "pinder_curated_tasks.json"
+SUPPORTED_TASK_LIBRARIES = {"proven", "ronig", "all", "pinder", "pinder_train", "pinder_eval", "all_plus_pinder"}
 
 SYSTEM_PROMPT = """You are a scientific protein binder design analyst operating a monomer-only binder search workflow.
 Principles:
@@ -95,7 +96,16 @@ def load_curated_ronig_tasks() -> list[dict]:
     return json.loads(CURATED_RONIG_TASKS_PATH.read_text())
 
 
-def get_task_library(task_library: str = "all") -> list[dict]:
+def load_curated_pinder_tasks() -> dict[str, list[dict]]:
+    payload = json.loads(CURATED_PINDER_TASKS_PATH.read_text())
+    return {"train": list(payload["train"]), "eval": list(payload["eval"])}
+
+
+def _pinder_dataset_split(split: str | None) -> str:
+    return "train" if split == "train" else "eval"
+
+
+def get_task_library(task_library: str = "all", *, split: str | None = None) -> list[dict]:
     if task_library not in SUPPORTED_TASK_LIBRARIES:
         supported = ", ".join(sorted(SUPPORTED_TASK_LIBRARIES))
         raise ValueError(f"Unsupported task_library={task_library!r}. Expected one of: {supported}")
@@ -103,12 +113,40 @@ def get_task_library(task_library: str = "all") -> list[dict]:
         return deepcopy(PROVEN_TASKS)
     if task_library == "ronig":
         return deepcopy(load_curated_ronig_tasks())
-    return deepcopy(PROVEN_TASKS) + deepcopy(load_curated_ronig_tasks())
+    if task_library == "all":
+        return deepcopy(PROVEN_TASKS) + deepcopy(load_curated_ronig_tasks())
+
+    pinder_tasks = load_curated_pinder_tasks()
+    if task_library == "pinder_train":
+        return deepcopy(pinder_tasks["train"])
+    if task_library == "pinder_eval":
+        return deepcopy(pinder_tasks["eval"])
+
+    split_tasks = deepcopy(pinder_tasks[_pinder_dataset_split(split)])
+    if task_library == "pinder":
+        return split_tasks
+    return deepcopy(PROVEN_TASKS) + deepcopy(load_curated_ronig_tasks()) + split_tasks
+
+
+def _pinder_prompt_context(task: dict) -> str:
+    if not task.get("source_pinder_id"):
+        return ""
+    ligand_profile = task.get("source_ligand_profile", {}) or {}
+    return (
+        "\nPINDER natural-interaction prior:\n"
+        f"- source PPI: {task['source_pinder_id']} ({task.get('source_pinder_split', 'unknown')} split)\n"
+        f"- natural partner length: {task.get('source_ligand_length')} aa; "
+        f"charged={ligand_profile.get('charged_fraction')}, polar={ligand_profile.get('polar_fraction')}, hydrophobic={ligand_profile.get('hydrophobic_fraction')}\n"
+        f"- interaction confidence={task.get('pinder_probability')}, buried SASA={task.get('pinder_buried_sasa')}, intermolecular contacts={task.get('pinder_intermolecular_contacts')}\n"
+        f"- hotspot note: {task.get('hotspot_derivation')}\n"
+        "Treat these PINDER statistics as priors for binder length and interface ambition; still rely on the tools and returned candidate metrics for final selection.\n"
+    )
 
 
 def make_prompt(task: dict) -> str:
     hotspots = ", ".join(task["hotspots"])
     gate = task["quality_gate"]
+    pinder_context = _pinder_prompt_context(task)
 
     return (
         "Use the scientific tools to build evidence for promising binder candidates and then select the strongest candidate ID.\n"
@@ -127,7 +165,8 @@ def make_prompt(task: dict) -> str:
         f"- binder distance RMSE <= {gate['max_binder_distance_rmse']}\n"
         f"- hotspot fraction >= {gate['min_hotspot_fraction']}\n"
         f"- interface residue contacts >= {gate['min_interface_residue_contacts']}\n"
-        f"- monomer plausibility score >= {gate['score_threshold']}\n\n"
+        f"- monomer plausibility score >= {gate['score_threshold']}\n"
+        f"{pinder_context}\n"
         "Target protein sequence:\n"
         f"{task['target_sequence']}"
     )
@@ -139,7 +178,7 @@ def build_task_rows(
     task_library: str = "all",
     seed: int = 0,
 ) -> list[dict]:
-    task_pool = get_task_library(task_library)
+    task_pool = get_task_library(task_library, split=split)
     ordering = list(range(len(task_pool)))
     random.Random(f"{task_library}:{split}:{seed}").shuffle(ordering)
 

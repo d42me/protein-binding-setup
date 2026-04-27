@@ -1,0 +1,10 @@
+# Larger hosted PINDER eval for protein-binder-monomer-real v0.5.1.
+# Requires hosted secrets/env vars: PROTEIN_BINDER_API_TOKEN and PROTEIN_BINDER_REMOTE_API_BASE_URL.
+# Working validation run: umanfnwl07gzp7rquzcabmvk (openai/gpt-4.1-mini, n=4).
+
+[[eval]]
+env_id = "d42me/protein-binder-monomer-real@0.5.1"
+model = "openai/gpt-4.1-mini"
+num_examples = 4
+rollouts_per_example = 1
+args = { task_library = "pinder", num_eval_examples = 12, max_turns = 30, remote_api_base_url = "http://95.133.252.95:8765", sync_support_on_start = false }
