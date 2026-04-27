@@ -166,6 +166,15 @@ def _candidate_science_components(candidate: dict[str, Any], state: vf.State) ->
 
 
 
+SCIENCE_COMPONENT_WEIGHTS = [
+    ("plausibility", 0.30),
+    ("geometry", 0.25),
+    ("binder_confidence", 0.20),
+    ("hotspot", 0.15),
+    ("interface", 0.10),
+]
+
+
 def _weighted_geometric_mean(weighted_components: list[tuple[float, float]]) -> float:
     total_weight = sum(weight for _, weight in weighted_components)
     if total_weight <= 0:
@@ -176,20 +185,29 @@ def _weighted_geometric_mean(weighted_components: list[tuple[float, float]]) -> 
     return math.exp(log_total / total_weight)
 
 
+def _weighted_arithmetic_mean(weighted_components: list[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _, weight in weighted_components)
+    if total_weight <= 0:
+        return 0.0
+    return sum(value * weight for value, weight in weighted_components) / total_weight
+
+
+def _weighted_science_components(candidate: dict[str, Any], state: vf.State) -> list[tuple[float, float]]:
+    components = _candidate_science_components(candidate, state)
+    return [(components[name], weight) for name, weight in SCIENCE_COMPONENT_WEIGHTS]
+
 
 def _candidate_science_reward_value(candidate: dict[str, Any], state: vf.State) -> float:
-    components = _candidate_science_components(candidate, state)
-    strict_quality = _weighted_geometric_mean(
-        [
-            (components["plausibility"], 0.30),
-            (components["geometry"], 0.25),
-            (components["binder_confidence"], 0.20),
-            (components["hotspot"], 0.15),
-            (components["interface"], 0.10),
-        ]
-    )
+    strict_quality = _weighted_geometric_mean(_weighted_science_components(candidate, state))
     pass_factor = 1.0 if candidate.get("passes_quality_gate") else 0.6
     return round(pass_factor * strict_quality, 3)
+
+
+def _candidate_quality_shaping_value(candidate: dict[str, Any], state: vf.State) -> float:
+    component_quality = _weighted_arithmetic_mean(_weighted_science_components(candidate, state))
+    rank_quality = float(candidate.get("rank_percentile", 0.0) or 0.0)
+    pass_bonus = 0.15 if candidate.get("passes_quality_gate") else 0.0
+    return round(_clamp01((0.65 * component_quality) + (0.25 * rank_quality) + pass_bonus), 3)
 
 
 def _sort_candidates_by_science_reward(candidates: list[dict[str, Any]], state: vf.State) -> list[dict[str, Any]]:
@@ -230,6 +248,21 @@ async def candidate_selection_reward(
         return 0.0
 
     return _candidate_science_reward_value(candidate, state)
+
+
+async def candidate_quality_shaping_reward(
+    completion: vf.Messages,
+    state: vf.State,
+    parser: vf.XMLParser,
+) -> float:
+    if not _pipeline_completed(state):
+        return 0.0
+
+    _, candidate = _submitted_candidate(state, completion, parser)
+    if not candidate:
+        return 0.0
+
+    return _candidate_quality_shaping_value(candidate, state)
 
 
 async def tool_overuse_penalty_reward(completion: vf.Messages, state: vf.State) -> float:
@@ -289,6 +322,15 @@ async def submitted_candidate_science_reward_metric(
 ) -> float:
     _, candidate = _submitted_candidate(state, completion, parser)
     return _candidate_science_reward_value(candidate, state) if candidate else 0.0
+
+
+async def submitted_candidate_quality_shaping_metric(
+    completion: vf.Messages,
+    state: vf.State,
+    parser: vf.XMLParser,
+) -> float:
+    _, candidate = _submitted_candidate(state, completion, parser)
+    return _candidate_quality_shaping_value(candidate, state) if candidate else 0.0
 
 
 async def submitted_candidate_plausibility_component_metric(
@@ -1705,8 +1747,8 @@ def load_environment(
 
     parser = vf.XMLParser(["candidate_id"], answer_field="candidate_id")
     rubric = vf.Rubric(
-        funcs=[candidate_selection_reward, tool_overuse_penalty_reward, parser.get_format_reward_func()],
-        weights=[1.0, 0.25, 0.01],
+        funcs=[candidate_selection_reward, candidate_quality_shaping_reward, tool_overuse_penalty_reward, parser.get_format_reward_func()],
+        weights=[1.0, 0.40, 0.25, 0.01],
         parser=parser,
     )
     rubric.add_metric(submitted_candidate_known_metric)
@@ -1715,6 +1757,7 @@ def load_environment(
     rubric.add_metric(submitted_candidate_rank_percentile_metric)
     rubric.add_metric(submitted_candidate_quality_metric)
     rubric.add_metric(submitted_candidate_science_reward_metric)
+    rubric.add_metric(submitted_candidate_quality_shaping_metric)
     rubric.add_metric(submitted_candidate_plausibility_component_metric)
     rubric.add_metric(submitted_candidate_geometry_component_metric)
     rubric.add_metric(submitted_candidate_binder_confidence_component_metric)

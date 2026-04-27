@@ -106,8 +106,8 @@ This mode is intentionally honest about the limitation: PINDER supplies real int
 
 This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
-## Reward design (v0.5.1)
-The reward is now deliberately harder: it gives the model more room to explore, but it no longer saturates just because a candidate clears the quality gate.
+## Reward design (v0.5.2)
+The reward is strict about scientific quality but now includes dense shaping so hosted training does not collapse into zero-advantage batches when most PINDER candidates miss one hard gate.
 
 ### Main scientific reward
 The dominant term is a **strict nonlinear aggregate** of the same visible candidate metrics:
@@ -125,6 +125,9 @@ Each component is normalized against a **stricter ceiling** than the basic quali
 At summary time, candidates are re-ranked by this same strict scientific objective, so the surfaced top candidate order still matches the main reward.
 
 The main scientific reward is only paid when the rollout has a fresh successful end-to-end summary and the submitted candidate ID is known.
+
+### Dense candidate-quality shaping
+A secondary shaping term rewards selecting a known high-ranked candidate with strong arithmetic component quality, even when one hard criterion such as hotspot fraction is still weak. This keeps the training signal dense enough for GRPO/AIPO while preserving the strict nonlinear science metric as the primary reward and metric.
 
 ### Tool-call penalty
 The first `30` tool calls are free.
@@ -194,7 +197,7 @@ The current checked-in defaults are approximately:
 - train rows: `96`
 - eval rows: `24`
 - max turns: `30`
-- reward design: strict nonlinear scientific candidate selection with post-30-call overuse penalty (`v0.5.1`)
+- reward design: strict nonlinear scientific candidate selection plus dense candidate-quality shaping and post-30-call overuse penalty (`v0.5.2`)
 
 To run that behavior explicitly instead of relying on defaults:
 
@@ -462,6 +465,7 @@ Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stage
 | `submitted_candidate_rank_percentile_metric` | Percentile rank of the selected candidate among all candidates |
 | `submitted_candidate_quality_metric` | Raw monomer plausibility score of the selected candidate |
 | `submitted_candidate_science_reward_metric` | Strict nonlinear scientific reward of the selected candidate |
+| `submitted_candidate_quality_shaping_metric` | Dense arithmetic/rank shaping score for the selected candidate |
 | `submitted_candidate_plausibility_component_metric` | Normalized plausibility component used by the main reward |
 | `submitted_candidate_geometry_component_metric` | Normalized geometry / RMSE component used by the main reward |
 | `submitted_candidate_binder_confidence_component_metric` | Normalized binder pLDDT component used by the main reward |
