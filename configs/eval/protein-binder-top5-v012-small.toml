@@ -1,0 +1,27 @@
+# Hosted-compatible small comparison suite for protein-binder v0.1.2.
+# Run with: prime eval run configs/eval/protein-binder-top5-v012-small.toml --hosted
+
+[[eval]]
+env_id = "d42me/protein-binder@0.1.2"
+model = "google/gemini-3-flash-preview"
+num_examples = 6
+
+[[eval]]
+env_id = "d42me/protein-binder@0.1.2"
+model = "google/gemini-3.1-pro-preview"
+num_examples = 6
+
+[[eval]]
+env_id = "d42me/protein-binder@0.1.2"
+model = "qwen/qwen3-30b-a3b-thinking-2507"
+num_examples = 6
+
+[[eval]]
+env_id = "d42me/protein-binder@0.1.2"
+model = "google/gemini-2.5-pro"
+num_examples = 6
+
+[[eval]]
+env_id = "d42me/protein-binder@0.1.2"
+model = "google/gemini-2.5-flash"
+num_examples = 6

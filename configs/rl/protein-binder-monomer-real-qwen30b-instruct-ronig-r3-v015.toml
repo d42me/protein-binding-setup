@@ -1,0 +1,17 @@
+name = "protein-binder-qwen30b-instruct-ronig-r3-v015"
+model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+max_steps = 6
+batch_size = 1
+rollouts_per_example = 1
+max_async_level = 1
+
+[sampling]
+max_tokens = 1024
+temperature = 0.7
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.1.5"
+args = { num_train_examples = 6, num_eval_examples = 1, max_turns = 8, task_library = "ronig" }
+
+[infrastructure]
+compute_size = "S"

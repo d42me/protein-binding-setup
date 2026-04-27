@@ -7,7 +7,7 @@ This environment implements **scope 0.5** of the broader protein-binder roadmap:
 - start from a weak seed binder,
 - redesign under a fixed compute budget,
 - use stateful tools to create and screen variants,
-- submit the best screened candidate ID.
+- submit the best screened candidate ID and exact sequence.
 
 It is intentionally earlier-stage than a full de novo pipeline. The goal is to train and evaluate:
 - strategic search,
@@ -17,21 +17,21 @@ It is intentionally earlier-stage than a full de novo pipeline. The goal is to t
 
 ## Environment type
 - **Type**: `StatefulToolEnv`
-- **Horizon**: multi-turn, short budgeted search
+- **Horizon**: multi-turn, longer budgeted search
 - **Final answer**: `<answer>C0003</answer><sequence>ACDEFGHIK</sequence>`
 
 ## Episode design
 Each task contains:
 - a synthetic target-pocket specification,
 - one weak seed candidate `C0000`,
-- a fixed redesign budget,
+- a fixed redesign budget of `18.0` units,
 - residue-class and charge constraints.
 
 The hidden ground-truth scorer is the same synthetic binder proxy used to create the task, but the agent only interacts through staged tools and noisy screens. The final answer must include both the selected candidate ID and its exact sequence so the externally visible output is biologically meaningful while still preserving search bookkeeping.
 
 ## Tools
 - `list_candidates()`
-  - inspect the current candidate table and remaining budget
+  - inspect the current candidate table, remaining budget, and the exact sequence for the recommended submission candidate, while separating quick-screened vs full-screened finalists
 - `design_variants(parent_id, strategy, num_variants)`
   - create new variants from an existing candidate
 - `quick_screen(candidate_ids)`
@@ -102,7 +102,7 @@ prime eval run configs/eval/protein-binder-baseline.toml -A
 | `num_eval_examples` | int | `24` | Number of synthetic eval episodes |
 | `train_seed` | int | `7` | Train RNG seed |
 | `eval_seed` | int | `17` | Eval RNG seed |
-| `max_turns` | int | `8` | Maximum assistant turns |
+| `max_turns` | int | `14` | Maximum assistant turns |
 
 ## Next step after scope 0.5
 Move from synthetic redesign to structure-guided redesign with stronger surrogate scoring and held-out target splits.

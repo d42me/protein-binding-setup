@@ -1,0 +1,22 @@
+name = "protein-binder-v041-ronig-qwen30b-thinking-train-b48-os10-s6-lr3e06-t10"
+model = "Qwen/Qwen3-30B-A3B-Thinking-2507"
+max_steps = 6
+batch_size = 48
+rollouts_per_example = 1
+max_async_level = 1
+oversampling_factor = 1.0
+learning_rate = 3e-06
+
+[sampling]
+temperature = 1.0
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.4.1"
+
+[val]
+num_examples = 12
+rollouts_per_example = 1
+interval = 1
+
+[infrastructure]
+compute_size = "S"

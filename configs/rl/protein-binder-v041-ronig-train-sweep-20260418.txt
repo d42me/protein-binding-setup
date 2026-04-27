@@ -1,0 +1,12 @@
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b1-os10-s100-lr5e06-t10-v041.toml	batch=1	os=1.0	steps=100	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b1-os15-s100-lr5e06-t10-v041.toml	batch=1	os=1.5	steps=100	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b2-os10-s50-lr5e06-t10-v041.toml	batch=2	os=1.0	steps=50	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b2-os15-s50-lr5e06-t10-v041.toml	batch=2	os=1.5	steps=50	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b4-os10-s25-lr5e06-t10-v041.toml	batch=4	os=1.0	steps=25	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b4-os15-s25-lr5e06-t10-v041.toml	batch=4	os=1.5	steps=25	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b2-os10-s50-lr1e05-t10-v041.toml	batch=2	os=1.0	steps=50	lr=1e-05	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b2-os15-s50-lr1e05-t10-v041.toml	batch=2	os=1.5	steps=50	lr=1e-05	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b4-os10-s25-lr1e05-t10-v041.toml	batch=4	os=1.0	steps=25	lr=1e-05	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b4-os15-s25-lr1e05-t10-v041.toml	batch=4	os=1.5	steps=25	lr=1e-05	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b2-os20-s50-lr5e06-t10-v041.toml	batch=2	os=2.0	steps=50	lr=5e-06	total_rollouts≈100
+protein-binder-monomer-real-qwen4b-instruct-ronig-train-b4-os20-s25-lr5e06-t10-v041.toml	batch=4	os=2.0	steps=25	lr=5e-06	total_rollouts≈100

@@ -1,0 +1,17 @@
+name = "protein-binder-qwen30b-thinking-all-r1-v014"
+model = "Qwen/Qwen3-30B-A3B-Thinking-2507"
+max_steps = 6
+batch_size = 1
+rollouts_per_example = 1
+max_async_level = 1
+
+[sampling]
+max_tokens = 2048
+temperature = 1.0
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.1.4"
+args = { num_train_examples = 15, num_eval_examples = 3, max_turns = 8, task_library = "all" }
+
+[infrastructure]
+compute_size = "S"

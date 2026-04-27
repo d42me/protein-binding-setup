@@ -84,8 +84,8 @@ Principles:
 - Use tools to explore, compare, and refine candidate evidence until you are confident in the strongest candidate.
 - Keep reasoning short, explicit, and evidence-linked. Do not restate the task or speculate repeatedly.
 - Before the final answer, every assistant turn must include a tool call.
-- The main scientific objective is linear and visible in the returned metrics: prefer higher monomer plausibility, higher binder pLDDT, lower binder distance RMSE, higher hotspot fraction, and higher interface contacts.
-- Tool use is free up to 20 total tool calls. After that, additional tool calls are increasingly penalized, so explore deliberately instead of repeating stages aimlessly.
+- The main scientific objective is strict and nonlinear: high reward requires a frontier-leading candidate with strong headroom across monomer plausibility, binder pLDDT, binder distance RMSE, hotspot fraction, and interface contacts.
+- Tool use is free up to 30 total tool calls. After that, additional tool calls are increasingly penalized, so explore deliberately instead of repeating stages aimlessly.
 - The final answer must be only:
 <candidate_id>CANDIDATE_ID</candidate_id>
 - Do not output raw sequence text in the final answer."""
@@ -115,8 +115,8 @@ def make_prompt(task: dict) -> str:
         "Each rollout starts empty: no derived structures, candidates, or scores exist until you produce them with tools.\n"
         "You may call tools in your own order and repeat them if needed, but upstream changes make downstream evidence stale.\n"
         "Before the final answer, every assistant turn must include a tool call.\n"
-        "Scientific selection objective: maximize candidate quality using the visible metrics. The main reward increases linearly with higher monomer plausibility, higher binder mean pLDDT, lower binder distance RMSE, higher hotspot fraction, and higher interface residue contacts.\n"
-        "Exploration budget: the first 20 tool calls are free. After that, extra tool calls are increasingly penalized, so only repeat stages when the extra evidence is worth it.\n\n"
+        "Scientific selection objective: maximize candidate quality using the visible metrics. The main reward is deliberately strict and nonlinear: high reward requires a frontier-leading candidate with strong headroom on monomer plausibility, binder mean pLDDT, binder distance RMSE, hotspot fraction, and interface residue contacts.\n"
+        "Exploration budget: the first 30 tool calls are free. After that, extra tool calls are increasingly penalized, so only repeat stages when the extra evidence is worth it.\n\n"
         f"Target ID: {task['target_id']}\n"
         f"Hotspots: {hotspots}\n"
         f"Binder length range: {task['binder_length_min']}-{task['binder_length_max']}\n"

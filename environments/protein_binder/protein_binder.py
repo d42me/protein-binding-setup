@@ -22,11 +22,14 @@ from redesign_scope import (
 from synthetic_dataset import normalize_sequence
 
 SYSTEM_PROMPT = """You are running a budgeted peptide-binder redesign campaign.
-Work strategically: inspect the candidate table, create variants with design strategies, screen promising candidates, and submit the best screened candidate.
-Reserve one turn for the final answer. If budget is getting low or you already have a strong screened candidate, stop searching and answer.
-Always finish with both tags, for example:
-<answer>C0003</answer>
-<sequence>ACDEFGHIK</sequence>"""
+Work strategically: inspect the table, create variants with the design strategies, screen promising candidates, and stop once you have strong evidence for a finalist.
+Do not answer before you have screened a candidate.
+Quick-screen scores are coarse; if a quick-screened candidate looks like your finalist, full-screen it before submitting when budget allows.
+Before the final answer, inspect the chosen candidate so you can copy its exact ID and exact sequence.
+If budget or turns are running low, stop experimenting and submit the best screened candidate you can justify.
+Final answer format:
+<answer>CANDIDATE_ID</answer>
+<sequence>EXACT_SEQUENCE</sequence>"""
 
 
 def _parse_submission(completion: vf.Messages, parser: vf.XMLParser) -> tuple[str, str]:
@@ -239,19 +242,34 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
             raise ValueError("Invalid rollout_id")
         return session
 
-    def _best_screened_candidate(self, session: dict[str, Any]) -> dict[str, Any] | None:
-        screened = [candidate for candidate in session["candidates"].values() if candidate.get("screened")]
-        if not screened:
-            return None
-        best = max(
-            screened,
-            key=lambda candidate: candidate.get("full_score") if candidate.get("full_score") is not None else candidate.get("quick_score") if candidate.get("quick_score") is not None else -1.0,
-        )
+    def _candidate_submission_summary(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        known_score = candidate.get("full_score") if candidate.get("full_score") is not None else candidate.get("quick_score")
+        screen_type = "full" if candidate.get("full_score") is not None else "quick"
         return {
-            "candidate_id": best["candidate_id"],
-            "known_score": best.get("full_score") if best.get("full_score") is not None else best.get("quick_score"),
-            "screen_type": "full" if best.get("full_score") is not None else "quick",
+            "candidate_id": candidate["candidate_id"],
+            "sequence": candidate["sequence"],
+            "known_score": known_score,
+            "screen_type": screen_type,
+            "submission_template": f"<answer>{candidate['candidate_id']}</answer>\n<sequence>{candidate['sequence']}</sequence>",
         }
+
+    def _best_quick_screened_candidate(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        quick_screened = [candidate for candidate in session["candidates"].values() if candidate.get("quick_score") is not None]
+        if not quick_screened:
+            return None
+        return self._candidate_submission_summary(max(quick_screened, key=lambda candidate: candidate["quick_score"]))
+
+    def _best_full_screened_candidate(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        full_screened = [candidate for candidate in session["candidates"].values() if candidate.get("full_score") is not None]
+        if not full_screened:
+            return None
+        return self._candidate_submission_summary(max(full_screened, key=lambda candidate: candidate["full_score"]))
+
+    def _best_screened_candidate(self, session: dict[str, Any]) -> dict[str, Any] | None:
+        best_full = self._best_full_screened_candidate(session)
+        if best_full is not None:
+            return best_full
+        return self._best_quick_screened_candidate(session)
 
     def _budget_error(self, session: dict[str, Any], required_cost: float) -> str:
         return json.dumps(
@@ -261,6 +279,8 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
                 "budget_remaining": round(session["budget_remaining"], 3),
                 "suggested_action": "submit_best_screened_candidate_now",
                 "best_screened_candidate": self._best_screened_candidate(session),
+                "best_full_screened_candidate": self._best_full_screened_candidate(session),
+                "best_quick_screened_candidate": self._best_quick_screened_candidate(session),
             },
             indent=2,
         )
@@ -282,6 +302,9 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
             {
                 "budget_remaining": round(session["budget_remaining"], 3),
                 "best_screened_candidate": self._best_screened_candidate(session),
+                "best_full_screened_candidate": self._best_full_screened_candidate(session),
+                "best_quick_screened_candidate": self._best_quick_screened_candidate(session),
+                "screening_guidance": "Prefer a full-screened finalist for submission. If a quick-screened candidate looks best, full-screen it before submitting when budget allows.",
                 "candidates": json.loads(format_candidate_table(session["candidates"])),
             },
             indent=2,
@@ -362,6 +385,8 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
                 "created": created_payload,
                 "budget_remaining": round(session["budget_remaining"], 3),
                 "best_screened_candidate": self._best_screened_candidate(session),
+                "best_full_screened_candidate": self._best_full_screened_candidate(session),
+                "best_quick_screened_candidate": self._best_quick_screened_candidate(session),
             },
             indent=2,
         )
@@ -403,6 +428,9 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
                 "results": results,
                 "budget_remaining": round(session["budget_remaining"], 3),
                 "best_screened_candidate": self._best_screened_candidate(session),
+                "best_full_screened_candidate": self._best_full_screened_candidate(session),
+                "best_quick_screened_candidate": self._best_quick_screened_candidate(session),
+                "screening_guidance": "Quick-screen scores are coarse. Full-screen a likely finalist before you submit when budget allows.",
             },
             indent=2,
         )
@@ -444,6 +472,9 @@ class ProteinBinderScopeEnv(vf.StatefulToolEnv):
                 "results": results,
                 "budget_remaining": round(session["budget_remaining"], 3),
                 "best_screened_candidate": self._best_screened_candidate(session),
+                "best_full_screened_candidate": self._best_full_screened_candidate(session),
+                "best_quick_screened_candidate": self._best_quick_screened_candidate(session),
+                "screening_guidance": "Use full-screen scores to choose among finalists when they are available.",
             },
             indent=2,
         )
@@ -454,7 +485,7 @@ def load_environment(
     num_eval_examples: int = 24,
     train_seed: int = 7,
     eval_seed: int = 17,
-    max_turns: int = 10,
+    max_turns: int = 14,
 ) -> vf.Environment:
     """Build the scope 0.5 budgeted binder-redesign environment."""
 

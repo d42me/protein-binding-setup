@@ -1,0 +1,15 @@
+name = "protein-binder-v031-ronig-qwen4b-instruct-train-probe"
+model = "Qwen/Qwen3-4B-Instruct-2507"
+max_steps = 2
+batch_size = 1
+rollouts_per_example = 1
+max_async_level = 1
+
+[sampling]
+temperature = 0.2
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.3.1"
+
+[infrastructure]
+compute_size = "S"

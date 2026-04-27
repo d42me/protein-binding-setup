@@ -17,7 +17,7 @@ from synthetic_dataset import (
 )
 
 STRATEGIES = ["balanced", "anchor", "composition", "charge", "explore"]
-DEFAULT_BUDGET = 12.0
+DEFAULT_BUDGET = 18.0
 DEFAULT_COSTS = {
     "design": 1.5,
     "quick": 0.75,
@@ -96,7 +96,9 @@ def make_scope05_prompt(spec: dict[str, Any]) -> str:
     seed_profile = analyze_sequence_profile(spec["seed_sequence"])
     return (
         "Optimize a peptide binder by iteratively redesigning a weak seed candidate under a fixed budget.\n"
-        "You must create and screen candidates with tools, then submit the best screened candidate together with its sequence.\n\n"
+        "Use the tools to inspect candidates, create variants, and screen promising options before you answer.\n"
+        "Do not submit an unscreened candidate. Quick-screen scores are coarse, so if a quick-screened candidate looks best, full-screen it before you submit when budget allows.\n"
+        "Before the final answer, inspect the chosen candidate so you can copy its exact ID and exact sequence.\n\n"
         f"Target ID: {spec['target_id']}\n"
         f"Binder length: {spec['length']}\n"
         f"Desired net charge: {spec['target_charge']:+d}\n"
@@ -105,6 +107,11 @@ def make_scope05_prompt(spec: dict[str, Any]) -> str:
         f"Composition targets: {', '.join(f'{name}={count}' for name, count in spec['desired_counts'].items())}\n"
         f"Budget: {spec['budget']} total units\n"
         f"Tool costs: design_variants={spec['costs']['design']}, quick_screen={spec['costs']['quick']} per candidate, full_screen={spec['costs']['full']} per candidate\n\n"
+        "Suggested workflow:\n"
+        "1. Inspect the current table before planning major changes.\n"
+        "2. Create a few targeted variants with the design strategies.\n"
+        "3. Screen promising candidates; use full_screen for finalists and use those higher-confidence results to decide what to submit.\n"
+        "4. Re-inspect the table, then submit the best screened candidate with its exact sequence.\n\n"
         "Strategy guide:\n"
         "- balanced: small mixed improvements across anchors, composition, and charge\n"
         "- anchor: focus on hotspot / anchor positions\n"
@@ -117,9 +124,10 @@ def make_scope05_prompt(spec: dict[str, Any]) -> str:
         f"- C0000 sequence: {spec['seed_sequence']}\n"
         f"- C0000 profile: length={seed_profile['length']}, net_charge={seed_profile['net_charge']:+d}, "
         f"special_residue_count={seed_profile['special_residue_count']}\n\n"
-        "Goal: submit the single best screened candidate using both tags, for example: "
-        "<answer>C0003</answer><sequence>ACDEFGHIK</sequence>. "
-        "The sequence must exactly match the submitted candidate ID. Reserve one turn for the final answer and do not spend your last turn on another tool call."
+        "Final answer format:\n"
+        "<answer>CANDIDATE_ID</answer>\n"
+        "<sequence>EXACT_SEQUENCE</sequence>\n"
+        "The submitted sequence must exactly match the submitted candidate ID. Reserve one turn for the final answer and do not spend your last turn on another tool call."
     )
 
 
@@ -165,18 +173,14 @@ def summarize_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
 
 
 def format_candidate_table(candidates: dict[str, dict[str, Any]]) -> str:
-    ordered = sorted(
-        candidates.values(),
-        key=lambda candidate: (
-            candidate.get("full_score")
-            if candidate.get("full_score") is not None
-            else candidate.get("quick_score")
-            if candidate.get("quick_score") is not None
-            else -1.0,
-            candidate["candidate_id"],
-        ),
-        reverse=True,
-    )
+    def sort_key(candidate: dict[str, Any]) -> tuple[float, float, str]:
+        if candidate.get("full_score") is not None:
+            return (2.0, float(candidate["full_score"]), candidate["candidate_id"])
+        if candidate.get("quick_score") is not None:
+            return (1.0, float(candidate["quick_score"]), candidate["candidate_id"])
+        return (0.0, -1.0, candidate["candidate_id"])
+
+    ordered = sorted(candidates.values(), key=sort_key, reverse=True)
     return json.dumps([summarize_candidate(candidate) for candidate in ordered], indent=2)
 
 

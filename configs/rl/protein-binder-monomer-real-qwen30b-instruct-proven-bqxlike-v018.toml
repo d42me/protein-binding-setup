@@ -1,0 +1,17 @@
+name = "protein-binder-qwen30b-instruct-proven-bqxlike-v018"
+model = "Qwen/Qwen3-30B-A3B-Instruct-2507"
+max_steps = 2
+batch_size = 2
+rollouts_per_example = 2
+max_async_level = 1
+
+[sampling]
+max_tokens = 2048
+temperature = 1.0
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.1.8"
+args = { num_train_examples = 4, num_eval_examples = 1, max_turns = 8, task_library = "proven", keep_remote_artifacts = true, sync_support_on_start = false }
+
+[infrastructure]
+compute_size = "S"

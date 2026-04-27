@@ -1,0 +1,210 @@
+[
+  {
+    "index": 1,
+    "model": "google/gemini-3-flash-preview",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "szbnn1qyv9ahssj0cz6c68i4",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: szbnn1qyv9ahssj0cz6c68i4\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/szbnn1qyv9ahssj0cz6c68i4\nView logs: prime eval logs szbnn1qyv9ahssj0cz6c68i4 -f"
+  },
+  {
+    "index": 2,
+    "model": "google/gemini-3.1-pro-preview",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "dhlald8ra0culr45f5kwf1k2",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: dhlald8ra0culr45f5kwf1k2\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/dhlald8ra0culr45f5kwf1k2\nView logs: prime eval logs dhlald8ra0culr45f5kwf1k2 -f"
+  },
+  {
+    "index": 3,
+    "model": "google/gemini-2.5-pro",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "q4gkdbp1oxojehi7vjld1v49",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: q4gkdbp1oxojehi7vjld1v49\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/q4gkdbp1oxojehi7vjld1v49\nView logs: prime eval logs q4gkdbp1oxojehi7vjld1v49 -f"
+  },
+  {
+    "index": 4,
+    "model": "google/gemini-2.5-flash",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "vdllvbfmhjol2anncjdvhllb",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: vdllvbfmhjol2anncjdvhllb\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/vdllvbfmhjol2anncjdvhllb\nView logs: prime eval logs vdllvbfmhjol2anncjdvhllb -f"
+  },
+  {
+    "index": 5,
+    "model": "google/gemini-3-pro-preview",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "zy0gouavynxh2mjl8z8pyp5k",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: zy0gouavynxh2mjl8z8pyp5k\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/zy0gouavynxh2mjl8z8pyp5k\nView logs: prime eval logs zy0gouavynxh2mjl8z8pyp5k -f"
+  },
+  {
+    "index": 6,
+    "model": "google/gemini-3-flash",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "efvd61vpq7uz6autzws30eag",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: efvd61vpq7uz6autzws30eag\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/efvd61vpq7uz6autzws30eag\nView logs: prime eval logs efvd61vpq7uz6autzws30eag -f"
+  },
+  {
+    "index": 7,
+    "model": "qwen/qwen3-30b-a3b-thinking-2507",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "x62m3bbnnbdfsgdg4waijem3",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: x62m3bbnnbdfsgdg4waijem3\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/x62m3bbnnbdfsgdg4waijem3\nView logs: prime eval logs x62m3bbnnbdfsgdg4waijem3 -f"
+  },
+  {
+    "index": 8,
+    "model": "qwen/qwen3-30b-a3b-instruct-2507",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "n6gtq7ysco8uh20rs333oow0",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: n6gtq7ysco8uh20rs333oow0\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/n6gtq7ysco8uh20rs333oow0\nView logs: prime eval logs n6gtq7ysco8uh20rs333oow0 -f"
+  },
+  {
+    "index": 9,
+    "model": "qwen/qwen3-235b-a22b-instruct-2507",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "um8ugz30z1r7fw0z5vctc7xz",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: um8ugz30z1r7fw0z5vctc7xz\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/um8ugz30z1r7fw0z5vctc7xz\nView logs: prime eval logs um8ugz30z1r7fw0z5vctc7xz -f"
+  },
+  {
+    "index": 10,
+    "model": "qwen/qwen3-235b-a22b-thinking-2507",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "cy2wbi487rtw6zqjvisduta8",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: cy2wbi487rtw6zqjvisduta8\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/cy2wbi487rtw6zqjvisduta8\nView logs: prime eval logs cy2wbi487rtw6zqjvisduta8 -f"
+  },
+  {
+    "index": 11,
+    "model": "anthropic/claude-haiku-4.5",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "bmrdpsj3vzrvvt80rl939aa1",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: bmrdpsj3vzrvvt80rl939aa1\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/bmrdpsj3vzrvvt80rl939aa1\nView logs: prime eval logs bmrdpsj3vzrvvt80rl939aa1 -f"
+  },
+  {
+    "index": 12,
+    "model": "anthropic/claude-sonnet-4.5",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "m3ync9aejg960ne1scyctmk6",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: m3ync9aejg960ne1scyctmk6\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/m3ync9aejg960ne1scyctmk6\nView logs: prime eval logs m3ync9aejg960ne1scyctmk6 -f"
+  },
+  {
+    "index": 13,
+    "model": "moonshotai/kimi-k2.5",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "wspw7015khg1pfvwnpor3mtu",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: wspw7015khg1pfvwnpor3mtu\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/wspw7015khg1pfvwnpor3mtu\nView logs: prime eval logs wspw7015khg1pfvwnpor3mtu -f"
+  },
+  {
+    "index": 14,
+    "model": "moonshotai/kimi-k2-0905",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "jjp1bpc6rustop62pdwwmfzx",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: jjp1bpc6rustop62pdwwmfzx\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/jjp1bpc6rustop62pdwwmfzx\nView logs: prime eval logs jjp1bpc6rustop62pdwwmfzx -f"
+  },
+  {
+    "index": 15,
+    "model": "moonshotai/kimi-k2-thinking",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "iy7l8pem33cplptgftvvld6u",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: iy7l8pem33cplptgftvvld6u\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/iy7l8pem33cplptgftvvld6u\nView logs: prime eval logs iy7l8pem33cplptgftvvld6u -f"
+  },
+  {
+    "index": 16,
+    "model": "z-ai/glm-5",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "pc0lmj9izi96he1r97jujx2u",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: pc0lmj9izi96he1r97jujx2u\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/pc0lmj9izi96he1r97jujx2u\nView logs: prime eval logs pc0lmj9izi96he1r97jujx2u -f"
+  },
+  {
+    "index": 17,
+    "model": "z-ai/glm-4.5-air",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "rzhtzm8h0wy71h0e4he2dnnj",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: rzhtzm8h0wy71h0e4he2dnnj\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/rzhtzm8h0wy71h0e4he2dnnj\nView logs: prime eval logs rzhtzm8h0wy71h0e4he2dnnj -f"
+  },
+  {
+    "index": 18,
+    "model": "z-ai/glm-4.5",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "uw23ow4rtxtxwy3qdlq0nr5l",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: uw23ow4rtxtxwy3qdlq0nr5l\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/uw23ow4rtxtxwy3qdlq0nr5l\nView logs: prime eval logs uw23ow4rtxtxwy3qdlq0nr5l -f"
+  },
+  {
+    "index": 19,
+    "model": "z-ai/glm-4.7",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "jrszlnk0ifyvdt12l7pgoby1",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: jrszlnk0ifyvdt12l7pgoby1\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/jrszlnk0ifyvdt12l7pgoby1\nView logs: prime eval logs jrszlnk0ifyvdt12l7pgoby1 -f"
+  },
+  {
+    "index": 20,
+    "model": "openai/gpt-oss-120b",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "m3jb0ymbvtf086t8omnqsnr2",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: m3jb0ymbvtf086t8omnqsnr2\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/m3jb0ymbvtf086t8omnqsnr2\nView logs: prime eval logs m3jb0ymbvtf086t8omnqsnr2 -f"
+  },
+  {
+    "index": 21,
+    "model": "openai/gpt-oss-20b",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "wnmb3zqy1jgxy3y64117na0m",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: wnmb3zqy1jgxy3y64117na0m\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/wnmb3zqy1jgxy3y64117na0m\nView logs: prime eval logs wnmb3zqy1jgxy3y64117na0m -f"
+  },
+  {
+    "index": 22,
+    "model": "arcee-ai/trinity-mini",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "i89b0zlwmp0zk0awshc10erk",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: i89b0zlwmp0zk0awshc10erk\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/i89b0zlwmp0zk0awshc10erk\nView logs: prime eval logs i89b0zlwmp0zk0awshc10erk -f"
+  },
+  {
+    "index": 23,
+    "model": "arcee/trinity-mini",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "qap45dxxypq9d8s275tl1h7c",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: qap45dxxypq9d8s275tl1h7c\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/qap45dxxypq9d8s275tl1h7c\nView logs: prime eval logs qap45dxxypq9d8s275tl1h7c -f"
+  },
+  {
+    "index": 24,
+    "model": "allenai/olmo-3-32b-think",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "jpsqr3g4y36gy7093dyoyzdg",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: jpsqr3g4y36gy7093dyoyzdg\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/jpsqr3g4y36gy7093dyoyzdg\nView logs: prime eval logs jpsqr3g4y36gy7093dyoyzdg -f"
+  },
+  {
+    "index": 25,
+    "model": "allenai/olmo-3-7b-think",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "p96pklkjbe5n2qf44c7l55qz",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: p96pklkjbe5n2qf44c7l55qz\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/p96pklkjbe5n2qf44c7l55qz\nView logs: prime eval logs p96pklkjbe5n2qf44c7l55qz -f"
+  },
+  {
+    "index": 26,
+    "model": "allenai/olmo-3-7b-instruct",
+    "env_id": "d42me/protein-binder@0.1.3",
+    "num_examples": 4,
+    "evaluation_id": "gvxr447jntko3dh3bq2c467c",
+    "raw_output": "Using hosted environment d42me/protein-binder\n\u2713 Hosted evaluation started\nEnvironment: d42me/protein-binder\nEvaluation ID: gvxr447jntko3dh3bq2c467c\nView results: \nhttps://app.primeintellect.ai/dashboard/evaluations/gvxr447jntko3dh3bq2c467c\nView logs: prime eval logs gvxr447jntko3dh3bq2c467c -f"
+  }
+]

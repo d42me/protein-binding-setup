@@ -1,0 +1,10 @@
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os10-s4-lr3e06-t10-v041.toml	batch=32	os=1.0	steps=4	lr=3e-06	total_rollouts≈128
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os10-s8-lr3e06-t10-v041.toml	batch=32	os=1.0	steps=8	lr=3e-06	total_rollouts≈256
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os125-s4-lr3e06-t10-v041.toml	batch=32	os=1.25	steps=4	lr=3e-06	total_rollouts≈128
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os125-s8-lr3e06-t10-v041.toml	batch=32	os=1.25	steps=8	lr=3e-06	total_rollouts≈256
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b48-os10-s4-lr3e06-t10-v041.toml	batch=48	os=1.0	steps=4	lr=3e-06	total_rollouts≈192
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b48-os10-s6-lr3e06-t10-v041.toml	batch=48	os=1.0	steps=6	lr=3e-06	total_rollouts≈288
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os10-s4-lr5e06-t10-v041.toml	batch=32	os=1.0	steps=4	lr=5e-06	total_rollouts≈128
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b32-os125-s4-lr5e06-t10-v041.toml	batch=32	os=1.25	steps=4	lr=5e-06	total_rollouts≈128
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b48-os10-s4-lr5e06-t10-v041.toml	batch=48	os=1.0	steps=4	lr=5e-06	total_rollouts≈192
+protein-binder-monomer-real-qwen30b-thinking-ronig-train-b64-os10-s2-lr3e06-t10-v041.toml	batch=64	os=1.0	steps=2	lr=3e-06	total_rollouts≈128

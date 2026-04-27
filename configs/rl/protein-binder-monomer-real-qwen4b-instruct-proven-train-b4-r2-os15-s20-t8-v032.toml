@@ -1,0 +1,16 @@
+name = "protein-binder-v032-proven-qwen4b-instruct-train-b4-r2-os15-s20-t8"
+model = "Qwen/Qwen3-4B-Instruct-2507"
+max_steps = 20
+batch_size = 4
+rollouts_per_example = 2
+max_async_level = 1
+oversampling_factor = 1.5
+
+[sampling]
+temperature = 0.2
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.3.2"
+
+[infrastructure]
+compute_size = "S"

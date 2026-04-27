@@ -229,7 +229,7 @@ def lookup_slurm_state(slurm_job_id: str) -> str | None:
     return None
 
 
-def submit_slurm_job(job_id: str, kind: str, stage: str | None) -> str:
+def build_slurm_submission(job_id: str, kind: str, stage: str | None) -> dict[str, Any]:
     spec = slurm_resource_spec(kind, stage)
     stdout_path, stderr_path = slurm_logs_for(job_id)
     worker_command = [sys.executable, str(API_SERVER_PATH), "__run-job", job_id]
@@ -263,6 +263,17 @@ def submit_slurm_job(job_id: str, kind: str, stage: str | None) -> str:
         args.extend(["--qos", SLURM_QOS])
     args.extend(SLURM_EXTRA_ARGS)
     args.extend(["--wrap", " ".join(shlex.quote(part) for part in worker_command)])
+    return {
+        "resource_spec": spec,
+        "worker_command": worker_command,
+        "sbatch_args": args,
+    }
+
+
+
+def submit_slurm_job(job_id: str, kind: str, stage: str | None) -> str:
+    submission = build_slurm_submission(job_id, kind, stage)
+    args = list(submission["sbatch_args"])
     returncode, stdout, stderr = run_subprocess(args)
     if returncode != 0:
         raise RuntimeError(f"sbatch failed: {stderr.strip() or stdout.strip()}")
@@ -270,6 +281,102 @@ def submit_slurm_job(job_id: str, kind: str, stage: str | None) -> str:
     if not slurm_job_id:
         raise RuntimeError("sbatch did not return a job id")
     return slurm_job_id
+
+
+
+def _init_command_preview(payload: dict[str, Any]) -> str:
+    run_dir = resolve_run_dir(str(payload["run_dir"]))
+    remote_target_fasta = run_dir / "inputs" / "target_sequence.fasta"
+    init_log_path = run_dir / "state" / "init-run.log"
+    fasta_content = f">{payload['target_id']}\n{payload['target_sequence']}\n"
+    write_fasta_code = (
+        "from pathlib import Path; "
+        f"Path({json.dumps(str(remote_target_fasta))}).parent.mkdir(parents=True, exist_ok=True); "
+        f"Path({json.dumps(str(remote_target_fasta))}).write_text({json.dumps(fasta_content)})"
+    )
+    gate = QualityGateModel.model_validate(payload["quality_gate"])
+    init_parts = [
+        "python3",
+        shlex.quote(str(PIPELINE_SCRIPT)),
+        "init-run",
+        "--run-dir",
+        shlex.quote(str(run_dir)),
+        "--target-sequence-fasta",
+        shlex.quote(str(remote_target_fasta)),
+        "--target-chain",
+        shlex.quote(str(payload["target_chain"])),
+        "--hotspots",
+        shlex.quote(",".join(payload["hotspots"])),
+        "--binder-length-min",
+        str(payload["binder_length_min"]),
+        "--binder-length-max",
+        str(payload["binder_length_max"]),
+        "--num-designs",
+        str(payload["num_designs"]),
+        "--num-seqs-per-backbone",
+        str(payload["num_seqs_per_backbone"]),
+        "--candidate-batch-size",
+        str(payload["candidate_batch_size"]),
+        "--max-concurrent-binder-batches",
+        "1",
+        "--min-target-mean-plddt",
+        str(gate.min_target_mean_plddt),
+        "--min-binder-mean-plddt",
+        str(gate.min_binder_mean_plddt),
+        "--max-binder-distance-rmse",
+        str(gate.max_binder_distance_rmse),
+        "--min-hotspot-fraction",
+        str(gate.min_hotspot_fraction),
+        "--min-interface-residue-contacts",
+        str(gate.min_interface_residue_contacts),
+        "--score-threshold",
+        str(gate.score_threshold),
+        ">",
+        shlex.quote(str(init_log_path)),
+        "2>&1",
+    ]
+    return maybe_wrap_stage_command(
+        f"mkdir -p {shlex.quote(str(run_dir / 'state'))} && python3 -c {shlex.quote(write_fasta_code)} && {' '.join(init_parts)}"
+    )
+
+
+
+def _job_command_preview(kind: str, stage: str | None, payload: dict[str, Any]) -> str:
+    if kind == "init-run":
+        return _init_command_preview(payload)
+    if kind == "delete-run":
+        run_dir = resolve_run_dir(str(payload["run_dir"]))
+        return f"rm -rf {shlex.quote(str(run_dir))}"
+    if kind == "stage":
+        run_dir = resolve_run_dir(str(payload["run_dir"]))
+        log_path = run_dir / "state" / f"{stage}.log"
+        return maybe_wrap_stage_command(stage_command(str(stage), run_dir, log_path))
+    raise ValueError(f"Unknown job kind: {kind!r}")
+
+
+
+def _job_debug_payload(record: dict[str, Any]) -> dict[str, Any]:
+    debug_payload: dict[str, Any] = {
+        "job_id": record["job_id"],
+        "kind": record["kind"],
+        "stage": record.get("stage"),
+        "status": record.get("status"),
+        "executor": record.get("executor"),
+        "slurm_job_id": record.get("slurm_job_id"),
+        "payload": record.get("payload"),
+        "stdout_log": record.get("stdout_log"),
+        "stderr_log": record.get("stderr_log"),
+        "command_preview": _job_command_preview(record["kind"], record.get("stage"), record["payload"]),
+        "stdout_tail": tail_file(Path(record["stdout_log"]), lines=80) if record.get("stdout_log") else "",
+        "stderr_tail": tail_file(Path(record["stderr_log"]), lines=80) if record.get("stderr_log") else "",
+    }
+    if record.get("slurm_job_id"):
+        submission = build_slurm_submission(record["job_id"], record["kind"], record.get("stage"))
+        debug_payload["slurm_state"] = lookup_slurm_state(record["slurm_job_id"])
+        debug_payload["slurm_resource_spec"] = submission["resource_spec"]
+        debug_payload["slurm_worker_command"] = submission["worker_command"]
+        debug_payload["slurm_sbatch_command"] = submission["sbatch_args"]
+    return debug_payload
 
 
 def run_init(payload: InitRunRequest) -> dict[str, Any]:
@@ -579,6 +686,46 @@ def get_job(job_id: str, authorization: str | None = Header(default=None)) -> di
     if job.get("slurm_job_id"):
         job["slurm_state"] = lookup_slurm_state(job["slurm_job_id"])
     return job
+
+
+@APP.get("/v1/jobs/{job_id}/debug")
+def get_job_debug(job_id: str, authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    require_auth(authorization)
+    try:
+        job = load_job_record(job_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="unknown job_id") from None
+    return _job_debug_payload(job)
+
+
+@APP.get("/v1/debug/slurm")
+def get_slurm_debug(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+    require_auth(authorization)
+    specs = {
+        "init-run": slurm_resource_spec("init-run", None),
+        "delete-run": slurm_resource_spec("delete-run", None),
+        **{stage: slurm_resource_spec("stage", stage) for stage in sorted(GPU_STAGES | CPU_STAGES)},
+    }
+    return {
+        "executor": EXECUTOR,
+        "support_dir": str(SUPPORT_DIR),
+        "pipeline_script": str(PIPELINE_SCRIPT),
+        "stage_lock_mode": STAGE_LOCK_MODE,
+        "slurm_gpu_partition": SLURM_GPU_PARTITION,
+        "slurm_cpu_partition": SLURM_CPU_PARTITION,
+        "slurm_account_configured": bool(SLURM_ACCOUNT),
+        "slurm_qos_configured": bool(SLURM_QOS),
+        "slurm_extra_args": SLURM_EXTRA_ARGS,
+        "resource_specs": specs,
+        "job_command_examples": {
+            kind: build_slurm_submission(f"example-{kind}", kind if kind in {"init-run", "delete-run"} else "stage", None if kind in {"init-run", "delete-run"} else kind)["sbatch_args"]
+            for kind in ["init-run", "delete-run"]
+        },
+        "stage_job_command_examples": {
+            stage: build_slurm_submission(f"example-{stage}", "stage", stage)["sbatch_args"]
+            for stage in sorted(GPU_STAGES | CPU_STAGES)
+        },
+    }
 
 
 def run_job_cli(job_id: str) -> int:

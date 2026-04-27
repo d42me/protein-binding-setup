@@ -5,6 +5,7 @@ import base64
 import io
 import json
 import logging
+import math
 import os
 import random
 import hashlib
@@ -62,6 +63,8 @@ PIPELINE_STAGES = [
     "binder_monomer",
     "summarize_candidates",
 ]
+FREE_TOOL_CALLS = 30
+TOOL_OVERUSE_PENALTY_SCALE = 400.0
 
 
 def _parse_submission_candidate_id(completion: vf.Messages, parser: vf.XMLParser) -> str:
@@ -128,29 +131,65 @@ def _linear_score_below(value: float | None, best: float, worst: float) -> float
 def _candidate_science_components(candidate: dict[str, Any], state: vf.State) -> dict[str, float]:
     gate = _quality_gate(state)
     max_rmse = float(gate.get("max_binder_distance_rmse", 1.5) or 1.5)
+    min_binder_plddt = float(gate.get("min_binder_mean_plddt", 80.0) or 80.0)
     min_contacts = float(gate.get("min_interface_residue_contacts", 10) or 10)
     min_hotspot = float(gate.get("min_hotspot_fraction", 0.33) or 0.33)
     score_threshold = float(gate.get("score_threshold", 0.72) or 0.72)
 
     return {
-        "plausibility": _linear_score_above(candidate.get("monomer_plausibility_score"), max(0.0, score_threshold - 0.25), min(1.0, score_threshold + 0.18)),
-        "binder_confidence": _linear_score_above(candidate.get("binder_mean_plddt"), 60.0, 90.0),
-        "geometry": _linear_score_below(candidate.get("binder_distance_rmse"), 0.5, max_rmse + 1.0),
-        "hotspot": _linear_score_above(candidate.get("hotspot_fraction"), 0.0, max(min_hotspot * 2.0, 0.66)),
-        "interface": _linear_score_above(candidate.get("interface_residue_contacts"), 0.0, max(min_contacts * 2.0, 20.0)),
+        "plausibility": _linear_score_above(
+            candidate.get("monomer_plausibility_score"),
+            score_threshold,
+            max(0.95, score_threshold + 0.23),
+        ),
+        "binder_confidence": _linear_score_above(
+            candidate.get("binder_mean_plddt"),
+            min_binder_plddt,
+            97.0,
+        ),
+        "geometry": _linear_score_below(
+            candidate.get("binder_distance_rmse"),
+            0.2,
+            max_rmse,
+        ),
+        "hotspot": _linear_score_above(
+            candidate.get("hotspot_fraction"),
+            min_hotspot,
+            1.0,
+        ),
+        "interface": _linear_score_above(
+            candidate.get("interface_residue_contacts"),
+            min_contacts,
+            max(30.0, min_contacts + 20.0),
+        ),
     }
+
+
+
+def _weighted_geometric_mean(weighted_components: list[tuple[float, float]]) -> float:
+    total_weight = sum(weight for _, weight in weighted_components)
+    if total_weight <= 0:
+        return 0.0
+    log_total = 0.0
+    for value, weight in weighted_components:
+        log_total += weight * math.log(max(1e-6, value))
+    return math.exp(log_total / total_weight)
+
 
 
 def _candidate_science_reward_value(candidate: dict[str, Any], state: vf.State) -> float:
     components = _candidate_science_components(candidate, state)
-    return round(
-        0.30 * components["plausibility"]
-        + 0.25 * components["geometry"]
-        + 0.20 * components["binder_confidence"]
-        + 0.15 * components["hotspot"]
-        + 0.10 * components["interface"],
-        3,
+    strict_quality = _weighted_geometric_mean(
+        [
+            (components["plausibility"], 0.30),
+            (components["geometry"], 0.25),
+            (components["binder_confidence"], 0.20),
+            (components["hotspot"], 0.15),
+            (components["interface"], 0.10),
+        ]
     )
+    pass_factor = 1.0 if candidate.get("passes_quality_gate") else 0.6
+    return round(pass_factor * strict_quality, 3)
 
 
 def _sort_candidates_by_science_reward(candidates: list[dict[str, Any]], state: vf.State) -> list[dict[str, Any]]:
@@ -170,12 +209,12 @@ def _total_stage_calls(state: vf.State) -> int:
     return sum(int(value or 0) for value in call_counts.values())
 
 
-def _tool_overuse_penalty_value(state: vf.State, free_calls: int = 20) -> float:
+def _tool_overuse_penalty_value(state: vf.State, free_calls: int = FREE_TOOL_CALLS) -> float:
     total_calls = _total_stage_calls(state)
     if total_calls <= free_calls:
         return 0.0
     overflow = total_calls - free_calls
-    return round(min(1.0, (overflow * overflow) / 225.0), 3)
+    return round(min(1.0, (overflow * overflow) / TOOL_OVERUSE_PENALTY_SCALE), 3)
 
 
 async def candidate_selection_reward(
@@ -572,7 +611,7 @@ def _stage_response_payload(
     payload: Any,
 ) -> str:
     total_calls = _total_stage_calls(state)
-    free_calls = 20
+    free_calls = FREE_TOOL_CALLS
     response = {
         "stage": stage_name,
         "stage_complete": stage_name if not (isinstance(payload, dict) and payload.get("error")) else None,

@@ -37,8 +37,8 @@ The environment rewards **scientific candidate selection quality**, not raw sequ
 The model has more freedom now:
 - it can call tools in its own order
 - it can repeat stages when exploration is scientifically justified
-- the first `20` tool calls are free
-- after `20`, additional tool calls incur an increasing penalty
+- the first `30` tool calls are free
+- after `30`, additional tool calls incur an increasing penalty
 
 ## Monomer-only quality gate
 The task currently uses the tuned insulin gate:
@@ -83,31 +83,29 @@ Each rollout now materializes the target from the bundled `target_sequence` dire
 
 This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
-## Reward design (v0.4)
-The reward is now built to be easier to understand and optimize.
+## Reward design (v0.4.1)
+The reward is now deliberately harder: it gives the model more room to explore, but it no longer saturates just because a candidate clears the quality gate.
 
 ### Main scientific reward
-The dominant term is a **linear weighted sum** of visible candidate metrics:
-- `30%` monomer plausibility
-- `25%` geometry quality from low binder distance RMSE
-- `20%` binder confidence from high binder mean pLDDT
-- `15%` hotspot coverage
-- `10%` interface residue contacts
+The dominant term is a **strict nonlinear aggregate** of the same visible candidate metrics:
+- monomer plausibility
+- geometry quality from low binder distance RMSE
+- binder confidence from high binder mean pLDDT
+- hotspot coverage
+- interface residue contacts
 
-These components are linearly normalized, so the model can improve reward directly by selecting candidates with:
-- higher `monomer_plausibility_score`
-- lower `binder_distance_rmse`
-- higher `binder_mean_plddt`
-- higher `hotspot_fraction`
-- higher `interface_residue_contacts`
+Each component is normalized against a **stricter ceiling** than the basic quality gate, and the final score uses a weighted geometric mean rather than a simple linear average. This means:
+- one weak scientific dimension now hurts more
+- barely-passing candidates no longer look near-perfect
+- high reward requires a frontier-leading candidate with strong headroom across several metrics at once
 
-At summary time, candidates are re-ranked by this same scientific objective, so the surfaced top candidate order matches the main reward rather than a hidden secondary heuristic.
+At summary time, candidates are re-ranked by this same strict scientific objective, so the surfaced top candidate order still matches the main reward.
 
 The main scientific reward is only paid when the rollout has a fresh successful end-to-end summary and the submitted candidate ID is known.
 
 ### Tool-call penalty
-The first `20` tool calls are free.
-After that, the environment applies an **increasing overuse penalty**, so the model can still explore, but repeated low-value calls become progressively more expensive.
+The first `30` tool calls are free.
+After that, the environment applies an **increasing overuse penalty**, so the model has more room to explore and refine candidate evidence before extra search becomes expensive.
 
 ### Format reward
 A tiny XML-format reward remains for valid final output formatting:
@@ -173,7 +171,7 @@ The current checked-in defaults are approximately:
 - train rows: `96`
 - eval rows: `24`
 - max turns: `30`
-- reward design: linear scientific candidate selection with post-20-call overuse penalty (`v0.4`)
+- reward design: strict nonlinear scientific candidate selection with post-30-call overuse penalty (`v0.4.1`)
 
 To run that behavior explicitly instead of relying on defaults:
 
@@ -400,13 +398,13 @@ Both modes preserve the same HTTP contract (`/v1/jobs/init-run`, `/v1/jobs/stage
 ## Metrics
 | Metric | Meaning |
 | --- | --- |
-| `reward` | Main scalar reward: linear scientific candidate score minus any post-20-call overuse penalty |
+| `reward` | Main scalar reward: strict nonlinear scientific candidate score minus any post-30-call overuse penalty |
 | `submitted_candidate_known_metric` | Final answer references a known candidate ID |
 | `submitted_candidate_passes_quality_gate` | Final answer selects a candidate that passes the quality gate |
 | `submitted_candidate_is_best_candidate` | Final answer selects the internally top-ranked candidate |
 | `submitted_candidate_rank_percentile_metric` | Percentile rank of the selected candidate among all candidates |
 | `submitted_candidate_quality_metric` | Raw monomer plausibility score of the selected candidate |
-| `submitted_candidate_science_reward_metric` | Linear scientific reward proxy of the selected candidate |
+| `submitted_candidate_science_reward_metric` | Strict nonlinear scientific reward of the selected candidate |
 | `submitted_candidate_plausibility_component_metric` | Normalized plausibility component used by the main reward |
 | `submitted_candidate_geometry_component_metric` | Normalized geometry / RMSE component used by the main reward |
 | `submitted_candidate_binder_confidence_component_metric` | Normalized binder pLDDT component used by the main reward |
