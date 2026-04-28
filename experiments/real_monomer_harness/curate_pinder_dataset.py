@@ -209,7 +209,7 @@ def iter_rows(split: str, *, streaming: bool, seed: int) -> Iterable[dict[str, A
     yield from dataset
 
 
-def collect_tasks(split: str, *, count: int, streaming: bool, seed: int) -> list[dict[str, Any]]:
+def collect_tasks(split: str, *, count: int, streaming: bool, seed: int, allow_short: bool = False) -> list[dict[str, Any]]:
     tasks: list[dict[str, Any]] = []
     for row in iter_rows(split, streaming=streaming, seed=seed):
         row = dict(row)
@@ -218,6 +218,8 @@ def collect_tasks(split: str, *, count: int, streaming: bool, seed: int) -> list
         tasks.append(task_from_row(row, source_split=split, index=len(tasks)))
         if len(tasks) >= count:
             return tasks
+    if allow_short:
+        return tasks
     raise RuntimeError(f"Only found {len(tasks)} PINDER tasks for split={split}; requested {count}")
 
 
@@ -228,9 +230,9 @@ def write_json(path: Path, payload: Any) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Curate compact PINDER target tasks for protein-binder-monomer-real.")
-    parser.add_argument("--train-count", type=int, default=96)
-    parser.add_argument("--eval-count", type=int, default=32)
-    parser.add_argument("--seed", type=int, default=20260426)
+    parser.add_argument("--train-count", type=int, default=384)
+    parser.add_argument("--eval-count", type=int, default=94)
+    parser.add_argument("--seed", type=int, default=20260428)
     parser.add_argument(
         "--output",
         type=Path,
@@ -240,14 +242,12 @@ def main() -> int:
 
     train_tasks = collect_tasks("train", count=args.train_count, streaming=True, seed=args.seed)
     valid_count = args.eval_count // 2
-    test_count = args.eval_count - valid_count
-    eval_tasks = [
-        *collect_tasks("valid", count=valid_count, streaming=False, seed=args.seed + 1),
-        *collect_tasks("test", count=test_count, streaming=False, seed=args.seed + 2),
-    ]
+    valid_tasks = collect_tasks("valid", count=valid_count, streaming=False, seed=args.seed + 1, allow_short=True)
+    test_tasks = collect_tasks("test", count=args.eval_count - len(valid_tasks), streaming=False, seed=args.seed + 2)
+    eval_tasks = [*valid_tasks, *test_tasks]
     payload = {
         "dataset": "Synthyra/PINDER",
-        "version": 1,
+        "version": 2,
         "curation": {
             "seed": args.seed,
             "filters": {

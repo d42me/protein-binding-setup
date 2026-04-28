@@ -1,0 +1,10 @@
+# 256-rollout hosted PINDER eval for protein-binder-monomer-real v0.5.3.
+# Claude Opus via Prime Inference OpenAI-compatible endpoint must put OpenRouter-style reasoning under extra_body.
+# Direct launch: n=64, rollouts_per_example=4, max_concurrent=2, sampling_args={"temperature":0.2,"max_tokens":8192,"extra_body":{"reasoning":{"max_tokens":2048}}}.
+
+[[eval]]
+env_id = "d42me/protein-binder-monomer-real@0.5.3"
+model = "anthropic/claude-opus-4.7"
+num_examples = 64
+rollouts_per_example = 4
+args = { task_library = "pinder", num_eval_examples = 94, max_turns = 30, remote_api_base_url = "http://95.133.252.95:8765", sync_support_on_start = false }

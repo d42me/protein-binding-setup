@@ -58,7 +58,7 @@ PINDER tasks use a slightly broader exploration gate (`target pLDDT >= 70`, `bin
 The environment now supports these task libraries via `task_library`:
 - `proven` — the original 3 hand-validated RFdiffusion examples
 - `ronig` — a bundled curated subset of **100** structure-validated tasks derived from `ronig/protein_binding_sequences`
-- `pinder` — a bundled curated subset from `Synthyra/PINDER` with **96 train** and **32 eval** receptor-target tasks
+- `pinder` — a bundled curated subset from `Synthyra/PINDER` with **384 train** and **94 eval** receptor-target tasks
 - `pinder_train` / `pinder_eval` — force one side of the bundled PINDER split
 - `all` — the mix of `proven + ronig`
 - `all_plus_pinder` — the mix of `proven + ronig + pinder split`
@@ -106,7 +106,7 @@ This mode is intentionally honest about the limitation: PINDER supplies real int
 
 This is still an early real-tool benchmark, but it now goes materially beyond the previous 3-target loop and is suitable for broader hosted eval scouting.
 
-## Reward design (v0.5.2)
+## Reward design (v0.5.3)
 The reward is strict about scientific quality but now includes dense shaping so hosted training does not collapse into zero-advantage batches when most PINDER candidates miss one hard gate.
 
 ### Main scientific reward
@@ -197,7 +197,7 @@ The current checked-in defaults are approximately:
 - train rows: `96`
 - eval rows: `24`
 - max turns: `30`
-- reward design: strict nonlinear scientific candidate selection plus dense candidate-quality shaping and post-30-call overuse penalty (`v0.5.2`)
+- reward design: strict nonlinear scientific candidate selection plus dense candidate-quality shaping and post-30-call overuse penalty (`v0.5.3`)
 
 To run that behavior explicitly instead of relying on defaults:
 
@@ -333,9 +333,9 @@ To regenerate the PINDER task library:
 
 ```bash
 python experiments/real_monomer_harness/curate_pinder_dataset.py \
-  --train-count 96 \
-  --eval-count 32 \
-  --seed 20260426 \
+  --train-count 384 \
+  --eval-count 94 \
+  --seed 20260428 \
   --output ./environments/protein_binder_monomer_real/protein_binder_monomer_real/data/pinder_curated_tasks.json
 ```
 
