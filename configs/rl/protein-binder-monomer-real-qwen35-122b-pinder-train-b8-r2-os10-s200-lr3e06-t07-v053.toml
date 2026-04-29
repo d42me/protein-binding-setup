@@ -1,0 +1,24 @@
+name = "protein-binder-v053-pinder-qwen35-122b-train-b8-r2-os10-s200-lr3e06-t07"
+model = "Qwen/Qwen3.5-122B-A10B"
+max_steps = 200
+batch_size = 8
+rollouts_per_example = 2
+max_async_level = 1
+oversampling_factor = 1.0
+learning_rate = 3e-06
+
+[sampling]
+temperature = 0.7
+max_tokens = 1024
+
+[[env]]
+id = "d42me/protein-binder-monomer-real@0.5.3"
+args = { task_library = "pinder", num_train_examples = 384, num_eval_examples = 94, max_turns = 30, remote_api_base_url = "http://95.133.252.95:8765", sync_support_on_start = false }
+
+[val]
+num_examples = 16
+rollouts_per_example = 1
+interval = 20
+
+[infrastructure]
+compute_size = "S"
